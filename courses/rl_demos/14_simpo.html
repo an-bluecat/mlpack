@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 14: SimPO — Optimize the Thing You Actually Decode With</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:880px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 12px;border:1px solid #333;text-align:center;font-size:.88em}
+th{background:#1a1a3a;color:#4fc3f7}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',monospace;font-size:.85em;line-height:1.8;overflow-x:auto}
+.math .line{margin:2px 0;white-space:pre}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.math .kw{color:#c586c0}
+.key{color:#ffb74d;font-weight:600}
+details.more{background:#12122a;border:1px solid #2a2a4a;border-radius:10px;padding:10px 14px;margin:10px 0}
+details.more summary{cursor:pointer;color:#4fc3f7;font-size:.92em;font-weight:600}
+details.more[open] summary{margin-bottom:8px}
+.scroll{overflow-x:auto}
+svg text{font-family:'Segoe UI',system-ui,sans-serif}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+<h1>Chapter 14: SimPO</h1>
+<p class="sub">Read after <a href="6_dpo.html" style="color:#4fc3f7">chapter 6</a>. DPO optimizes one quantity and then you generate with a different one. SimPO makes them the same quantity — and deletes the reference model on the way.</p>
+<div class="nav" id="nav"></div>
+
+<!-- ============================ PAGE 0 ============================ -->
+<div class="page on" data-t="0. The Mismatch">
+<h2>The Bug: You Train on One Score and Generate With Another</h2>
+
+<div class="card blue">
+<h3>Step 1 — what chapter 6 optimized</h3>
+<p>DPO's implicit reward, the one earned on ch. 6 tab 2.2:</p>
+<div class="math">
+<div class="line"><span class="lbl">r_DPO</span>(x, y) = β &times; log( P_current(y|x) / P_ref(y|x) )</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Two properties to hold on to:</span></div>
+<div class="line"><span class="cmt">//   (a) it is a TOTAL over the response, not a per-token average</span></div>
+<div class="line"><span class="cmt">//   (b) it is measured RELATIVE to a frozen reference model</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3>Step 2 — what you actually rank with at generation time</h3>
+<p>Now look at what the model does when it produces or scores text. Any time you compare candidate outputs — beam search, best-of-n, ranking two samples — you do not use the raw product of token probabilities, because that punishes long sequences automatically (each extra token multiplies in another number below 1, exactly as ch. 6&#x2019;s Step 0 showed). You use the <strong>average log-probability per token</strong>:</p>
+<div class="math">
+<div class="line"><span class="lbl">p_&theta;</span>(y|x) = ( 1 / |y| ) &times; log P(y|x)     <span class="cmt">// |y| = number of tokens</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Note what is NOT in this expression:</span></div>
+<div class="line"><span class="cmt">//   - no reference model (there is only one model at inference)</span></div>
+<div class="line"><span class="cmt">//   - and it IS divided by length</span></div>
+</div>
+<p style="margin-top:6px">So the training objective and the generation metric differ on <em>both</em> properties from step 1. They are simply different functions of the same response.</p>
+</div>
+
+<div class="card red">
+<h3>Step 3 — so they can disagree. Here is the smallest case where they do</h3>
+<p>Two responses to one prompt. Forget the reference for a moment and just compare total vs average log-probability:</p>
+<div class="scroll"><table>
+<tr><th>response</th><th>tokens |y|</th><th>total log P</th><th>average log P = total / |y|</th></tr>
+<tr><td style="color:#4caf50">winner (thorough)</td><td>5</td><td>&minus;3.5</td><td style="color:#4caf50"><strong>&minus;0.70</strong></td></tr>
+<tr><td style="color:#ef5350">loser (short, bland)</td><td>2</td><td style="color:#ef5350"><strong>&minus;2.0</strong></td><td>&minus;1.00</td></tr>
+</table></div>
+<div class="math">
+<div class="line"><span class="cmt">// Rank by TOTAL log P (what an unnormalized loss pushes on):</span></div>
+<div class="line">   &minus;2.0  &gt;  &minus;3.5   &rarr;  the <span class="val">LOSER</span> ranks higher   <span class="cmt">// wrong!</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Rank by AVERAGE log P (what generation actually uses):</span></div>
+<div class="line">   &minus;0.70 &gt; &minus;1.00   &rarr;  the <span class="val">WINNER</span> ranks higher   <span class="cmt">// correct</span></div>
+</div>
+<p style="margin-top:6px">The two rankings point opposite ways, and nothing is broken or unusual here &mdash; the loser is just <em>shorter</em>. Length alone flipped the verdict.</p>
+</div>
+
+<div class="card orange">
+<h3>Step 4 — how often does this actually happen? The paper measured it</h3>
+<p>Take a trained DPO model and, for each training triple (prompt, winner, loser), check whether the two rankings agree:</p>
+<div class="math">
+<div class="line"><span class="cmt">// Does  r_DPO(winner) &gt; r_DPO(loser)</span></div>
+<div class="line"><span class="cmt">//  imply  avg_logP(winner) &gt; avg_logP(loser)  ?</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">agreement on training triples:  <span class="val">~50%</span>   <span class="cmt">// SimPO paper, Meng et al. 2024</span></div>
+</div>
+<p style="margin-top:6px">About a coin flip. So on roughly half the data, DPO successfully raised the quantity it optimizes while the quantity you generate with went the <em>other</em> way. The training signal and the deployed behavior are only loosely coupled.</p>
+</div>
+
+<div class="card purple">
+<h3>The fix, previewed as three edits</h3>
+<p>SimPO changes DPO in three places, and each one is a separate tab from here:</p>
+<div class="scroll"><table>
+<tr><th></th><th>DPO (ch. 6)</th><th>SimPO</th><th>Why</th></tr>
+<tr><td>1</td><td>total log P</td><td><strong>&divide; |y|</strong> &mdash; average per token</td><td>match the generation metric (this tab)</td></tr>
+<tr><td>2</td><td>relative to P_ref</td><td><strong>no reference model</strong></td><td>generation has no reference either</td></tr>
+<tr><td>3</td><td>push until gap &gt; 0</td><td><strong>push until gap &gt; &gamma;</strong></td><td>"clearly better", not "barely better"</td></tr>
+</table></div>
+</div>
+
+<button class="nx" onclick="go(1)">Next: Fix 1 &mdash; normalize by length &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 1 ============================ -->
+<div class="page" data-t="1. Fix 1: Length">
+<h2>Fix 1 — Divide by the Number of Tokens</h2>
+
+<div class="card blue">
+<h3>The edit itself</h3>
+<div class="math">
+<div class="line"><span class="cmt">// DPO's score for one response:</span></div>
+<div class="line">score(y) = β &times; log( P_cur(y) / P_ref(y) )</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// SimPO's score for one response &mdash; length-normalized:</span></div>
+<div class="line"><span class="hl">score(y) = ( β / |y| ) &times; log P_cur(y)</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// |y| = token count of that response. Note it is the response's OWN</span></div>
+<div class="line"><span class="cmt">// length &mdash; winner and loser are each divided by their own count.</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3>Why dividing is the right move, in one line of arithmetic</h3>
+<p>Chapter 6 Step 0 established that a response&#x2019;s probability is a <em>product</em> over tokens, so its log is a <em>sum</em>:</p>
+<div class="math">
+<div class="line">log P(y) = log p(t&#8321;) + log p(t&#8322;) + ... + log p(t<sub>|y|</sub>)   <span class="cmt">// |y| terms</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Every term is negative (probabilities are below 1). So a longer</span></div>
+<div class="line"><span class="cmt">// response has a more negative sum FOR FREE &mdash; not because it is</span></div>
+<div class="line"><span class="cmt">// worse, but because it has more terms.</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Dividing by |y| turns a SUM into a MEAN: "how confident is this</span></div>
+<div class="line"><span class="cmt">// model per token", which no longer grows with length.</span></div>
+</div>
+</div>
+
+<div class="card green">
+<h3>Run the page-0 example through it</h3>
+<p>Same two responses, now with SimPO&#x2019;s score at &beta; = 2.0:</p>
+<div class="scroll"><table>
+<tr><th>response</th><th>|y|</th><th>log P</th><th>avg = log P / |y|</th><th>score = &beta; &times; avg</th></tr>
+<tr><td style="color:#4caf50">winner</td><td>5</td><td>&minus;3.5</td><td>&minus;0.70</td><td style="color:#4caf50"><strong>&minus;1.40</strong></td></tr>
+<tr><td style="color:#ef5350">loser</td><td>2</td><td>&minus;2.0</td><td>&minus;1.00</td><td style="color:#ef5350"><strong>&minus;2.00</strong></td></tr>
+</table></div>
+<div class="math">
+<div class="line">gap = score(winner) &minus; score(loser)</div>
+<div class="line">    = &minus;1.40 &minus; (&minus;2.00) = <span class="val">+0.60</span>   <span class="cmt">// winner ahead ✓</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Under the unnormalized version the gap was &minus;3.5 &minus; (&minus;2.0) = &minus;1.5,</span></div>
+<div class="line"><span class="cmt">// i.e. the loser was ahead. Normalizing flipped it to the truth.</span></div>
+</div>
+</div>
+
+<div class="card orange">
+<h3>The second thing this buys: it removes the length incentive</h3>
+<p>Chapter 5 tab 7 (trap 3) and ch. 6&#x2019;s gotcha card both ended at the same place &mdash; preference training tends to inflate length. Watch what normalization does to that incentive:</p>
+<div class="math">
+<div class="line"><span class="cmt">// Suppose the model pads the winner with 5 filler tokens, each with</span></div>
+<div class="line"><span class="cmt">// a typical log-prob of &minus;0.70 (i.e. exactly average, no better):</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">before:  log P = &minus;3.5,  |y| = 5   &rarr;  avg = <span class="val">&minus;0.70</span></div>
+<div class="line">after:   log P = &minus;7.0,  |y| = 10  &rarr;  avg = <span class="val">&minus;0.70</span>   <span class="cmt">// unchanged!</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Padding with average-quality tokens moves the score NOT AT ALL.</span></div>
+<div class="line"><span class="cmt">// To raise an average you must add tokens BETTER than your current</span></div>
+<div class="line"><span class="cmt">// average &mdash; length by itself buys nothing.</span></div>
+</div>
+<p style="margin-top:6px">Reported effect: the paper finds SimPO does not meaningfully inflate output length &mdash; its Gemma-2-9B model averages <strong>1833</strong> tokens against GPT-4-Turbo&#x2019;s <strong>1802</strong> on the same benchmark, so the win is not bought with verbosity.</p>
+</div>
+
+<button class="nx" onclick="go(2)">Next: Fix 2 &mdash; delete the reference model &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 2 ============================ -->
+<div class="page" data-t="2. Fix 2: No Reference">
+<h2>Fix 2 — Drop &pi;_ref Entirely</h2>
+
+<div class="card red">
+<h3>Careful: chapter 6 spent a whole tab justifying the reference. What changed?</h3>
+<p>This is the step that should make you suspicious, so walk it slowly. Ch. 6 tab 2.1 introduced the reference for <strong>one specific job</strong>: raw probabilities are not comparable across responses, because a long or unusual sentence has a small probability regardless of quality. Dividing by <code>P_ref</code> fixed that by comparing each response <em>against itself</em>, so length and base-rate cancelled.</p>
+<p style="margin-top:6px"><span class="key">But fix 1 already solved that problem a different way.</span> Length normalization makes the score comparable across responses directly. The reference&#x2019;s main job is now done by the <code>/ |y|</code>.</p>
+</div>
+
+<div class="card">
+<h3>What the two approaches are each doing</h3>
+<div class="scroll"><table>
+<tr><th></th><th>DPO's answer</th><th>SimPO's answer</th></tr>
+<tr><td>Make scores comparable</td><td>divide by the same response's reference probability</td><td>divide by the response's token count</td></tr>
+<tr><td>Models in memory during training</td><td><strong>2</strong> (policy + frozen reference)</td><td><strong>1</strong> (policy only)</td></tr>
+<tr><td>Forward passes per pair</td><td>4 (2 responses &times; 2 models)</td><td>2 (2 responses &times; 1 model)</td></tr>
+<tr><td>Matches the generation metric?</td><td>no &mdash; reference appears nowhere at inference</td><td>yes &mdash; identical quantity</td></tr>
+</table></div>
+<p style="margin-top:6px">The compute and memory saving is real and immediate: the reference model is the same size as the policy, so you free roughly half the model memory and half the forward work.</p>
+</div>
+
+<div class="card orange">
+<h3>The honest cost &mdash; what you give up</h3>
+<p>The reference had a <em>second</em> job that fix 1 does <strong>not</strong> replace: it was the anchor. Ch. 6 tab 3 showed &beta; and the frozen &pi;_ref together forming the total-drift leash &mdash; chapter 5&#x2019;s KL leash in DPO clothing. Delete the reference and that explicit guarantee goes with it:</p>
+<div class="math">
+<div class="line"><span class="cmt">// DPO:    the loss itself contains a term that grows when the</span></div>
+<div class="line"><span class="cmt">//         policy moves away from the frozen snapshot.</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// SimPO:  no such term exists. Nothing in the objective knows</span></div>
+<div class="line"><span class="cmt">//         or cares how far you have travelled from the SFT model.</span></div>
+</div>
+<p style="margin-top:6px">What holds it together in practice is everything <em>around</em> the loss: you start from a good SFT model, train roughly one pass over a fixed preference set with a small learning rate, and the target margin from the next tab keeps the push from running away. That is weaker than a guarantee, and it is the main thing to say out loud if you are asked to compare the two.</p>
+</div>
+
+<button class="nx" onclick="go(3)">Next: Fix 3 &mdash; the target margin &gamma; &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 3 ============================ -->
+<div class="page" data-t="3. Fix 3: Margin γ">
+<h2>Fix 3 — Demand a Margin, Not Just a Win</h2>
+
+<div class="card blue">
+<h3>The problem &gamma; solves: "barely ahead" already satisfies the loss</h3>
+<p>Every preference loss so far &mdash; ch. 5&#x2019;s Bradley-Terry, ch. 6&#x2019;s DPO &mdash; is happy the moment the gap turns positive, and then keeps pushing with an ever-weaker force. Recall the push from ch. 6:</p>
+<div class="math">
+<div class="line">push = 1 &minus; sigmoid(gap)</div>
+<div class="line">&nbsp;</div>
+<div class="line">gap = +0.05  &rarr;  sigmoid = 0.512  &rarr;  push = <span class="val">0.488</span>   <span class="cmt">// still strong</span></div>
+<div class="line">gap = +0.60  &rarr;  sigmoid = 0.646  &rarr;  push = <span class="val">0.354</span></div>
+<div class="line">gap = +3.00  &rarr;  sigmoid = 0.953  &rarr;  push = <span class="val">0.047</span>   <span class="cmt">// nearly done</span></div>
+</div>
+<p style="margin-top:6px">The trouble is that a gap of +0.05 is <em>noise</em>. The model ranks the winner a hair above the loser; one different sample, one different phrasing, and it flips. Yet the loss already treats this pair as most of the way home.</p>
+</div>
+
+<div class="card green">
+<h3>The edit: subtract a constant before the sigmoid</h3>
+<div class="math">
+<div class="line"><span class="cmt">// DPO:    loss = &minus;log sigmoid( gap )</span></div>
+<div class="line"><span class="hl">// SimPO:  loss = &minus;log sigmoid( gap &minus; &gamma; )</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Read it as a moved finish line: the loss now behaves as though</span></div>
+<div class="line"><span class="cmt">// "zero" is at gap = &gamma;. A pair is only "solved" once the winner</span></div>
+<div class="line"><span class="cmt">// leads by &gamma;, not by any positive amount.</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3>Run it on the page-1 numbers (gap = +0.60, &gamma; = 1.0)</h3>
+<div class="scroll"><table>
+<tr><th></th><th>argument to sigmoid</th><th>sigmoid</th><th>loss = &minus;log(&middot;)</th><th>push = 1 &minus; sigmoid</th></tr>
+<tr><td>without &gamma;</td><td>0.60</td><td>0.646</td><td>0.437</td><td>0.354</td></tr>
+<tr><td>with &gamma; = 1.0</td><td>0.60 &minus; 1.0 = &minus;0.40</td><td>0.401</td><td><strong>0.913</strong></td><td style="color:#4caf50"><strong>0.599</strong></td></tr>
+</table></div>
+<p style="margin-top:6px">Read the last column. The winner is <em>already ahead</em> (gap +0.60), and without &gamma; the loss has largely lost interest. With &gamma; = 1.0 the pair is still treated as unfinished, and the push is <strong>70% stronger</strong>. Training keeps working on this pair until the lead is convincing.</p>
+</div>
+
+<div class="card purple">
+<h3>Where you have met this idea before</h3>
+<p>Chapter 5 tab 4 made the point that the Bradley-Terry loss has <strong>no stop gate</strong>: sigmoid never reaches 1, so the loss shrinks forever and "done" is never expressed in the objective. &gamma; does not remove that, but it does something useful with it &mdash; it says <em>where</em> the interesting region ends:</p>
+<div class="scroll"><table>
+<tr><th>Method</th><th>What it targets</th></tr>
+<tr><td>DPO</td><td>gap &gt; 0, pushed forever, weaker and weaker</td></tr>
+<tr><td>SimPO</td><td>gap &gt; &gamma; &mdash; a stated, finite goal</td></tr>
+<tr><td>IPO (ch. 6 variants table)</td><td>same complaint, different cure: a squared loss with a finite optimum</td></tr>
+</table></div>
+<p style="margin-top:6px">Two papers, one diagnosis: an unbounded objective on a fixed dataset overtrains. SimPO moves the finish line; IPO changes the shape of the track.</p>
+</div>
+
+<button class="nx" onclick="go(4)">Next: the full loss, the numbers, the trade-offs &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 4 ============================ -->
+<div class="page" data-t="4. Full Picture">
+<h2>The Whole Loss, and When to Reach For It</h2>
+
+<div class="card blue">
+<h3>All three edits in one line</h3>
+<div class="math">
+<div class="line"><span class="hl">loss = &minus;log sigmoid[ (β/|y_w|)&middot;log P(y_w|x) &minus; (β/|y_l|)&middot;log P(y_l|x) &minus; &gamma; ]</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">//        └──────── score(winner) ───────┘  └──────── score(loser) ────────┘</span></div>
+<div class="line"><span class="cmt">//</span></div>
+<div class="line"><span class="cmt">// y_w, y_l = winning / losing response      |y| = its token count</span></div>
+<div class="line"><span class="cmt">// P        = the CURRENT policy only &mdash; no P_ref anywhere</span></div>
+<div class="line"><span class="cmt">// β        = scale (how many "reward units" per unit of avg log-prob)</span></div>
+<div class="line"><span class="cmt">// γ        = target margin (the moved finish line)</span></div>
+</div>
+<p style="margin-top:6px">Compare to ch. 6&#x2019;s DPO loss and you can point at every difference: two divisions by <code>|y|</code>, two deleted <code>P_ref</code> terms, one subtracted <code>&gamma;</code>.</p>
+</div>
+
+<div class="card green">
+<h3>Hyperparameters, and what each one does when you turn it</h3>
+<div class="scroll"><table>
+<tr><th>knob</th><th>paper's range</th><th>what it controls</th><th>too large</th><th>too small</th></tr>
+<tr><td>&beta;</td><td>2.0 &ndash; 2.5</td><td>how many reward units one unit of average log-prob is worth &mdash; i.e. the scale of the gap fed to sigmoid</td><td>sigmoid saturates, pairs go quiet early</td><td>gaps stay near 0, weak discrimination</td></tr>
+<tr><td>&gamma;</td><td>0.5 &ndash; 1.5</td><td>how big a lead counts as "done"</td><td>never satisfied &mdash; keeps pushing, drift risk (no reference to stop it)</td><td>reverts toward plain DPO behavior</td></tr>
+</table></div>
+<p style="margin-top:6px;font-size:.88em">Note &beta; is much larger than DPO&#x2019;s typical 0.1. That is expected, not a contradiction: it multiplies an <em>average</em> log-prob (a number around &minus;0.7 per token) rather than a log-<em>ratio</em> (a number around &plusmn;0.2), so it needs a bigger scale to produce comparable gaps.</p>
+</div>
+
+<div class="card">
+<h3>Reported results</h3>
+<div class="scroll"><table>
+<tr><th>setup</th><th>method</th><th>AlpacaEval 2 (length-controlled win rate)</th></tr>
+<tr><td rowspan="3">Llama-3-8B-Instruct</td><td>SFT only</td><td>26.0%</td></tr>
+<tr><td>DPO</td><td>40.3%</td></tr>
+<tr><td><strong>SimPO</strong></td><td style="color:#4caf50"><strong>44.7%</strong></td></tr>
+<tr><td rowspan="2">Gemma-2-9B-it</td><td>base instruct model</td><td>51.1%</td></tr>
+<tr><td><strong>SimPO</strong></td><td style="color:#4caf50"><strong>72.4%</strong></td></tr>
+</table></div>
+<p style="margin-top:6px;font-size:.88em">Headline claims from the paper: up to <strong>+6.4</strong> points over DPO on AlpacaEval 2 and up to <strong>+7.5</strong> on Arena-Hard, with the best model reaching 59.1% on Arena-Hard. Note the metric is the <em>length-controlled</em> win rate, which is the right one to quote here &mdash; an uncontrolled win rate would reward exactly the length inflation this method claims to avoid.</p>
+</div>
+
+<div class="card orange">
+<h3>Review questions on this chapter</h3>
+<div class="scroll"><table>
+<tr><th style="width:40%">Question</th><th>One-line answer</th></tr>
+<tr><td>"Why is SimPO reference-free &mdash; isn't that dangerous?"</td><td>Length normalization takes over the reference's <em>comparability</em> job; what you genuinely lose is its <em>anchoring</em> job, and that is covered only by the SFT init, a short low-LR run, and &gamma;.</td></tr>
+<tr><td>"What's the actual bug in DPO that SimPO names?"</td><td>DPO optimizes a total, reference-relative log-ratio while decoding ranks by average per-token log-prob &mdash; the paper measures agreement between the two rankings at only ~50%.</td></tr>
+<tr><td>"Why does SimPO resist length inflation?"</td><td>Padding with average-quality tokens leaves an average unchanged; you can only raise a mean by adding tokens better than the current mean.</td></tr>
+<tr><td>"Why is &beta; ~2 here but ~0.1 in DPO?"</td><td>Different units &mdash; it scales a per-token average (&asymp;&minus;0.7) instead of a log-ratio (&asymp;&plusmn;0.2).</td></tr>
+<tr><td>"What does &gamma; buy?"</td><td>It moves the finish line from "ahead by anything" to "ahead by &gamma;", so noise-sized leads are not treated as solved.</td></tr>
+</table></div>
+</div>
+
+<div class="card purple">
+<h3>Where this sits on the map</h3>
+<div class="scroll"><table>
+<tr><th>Chapter</th><th>Method</th><th>Its one idea</th></tr>
+<tr><td>5</td><td>RLHF / PPO</td><td>Learn a reward model, optimize it under a KL leash</td></tr>
+<tr><td>6</td><td>DPO</td><td>The LM is its own reward model &mdash; skip the RM</td></tr>
+<tr><td style="color:#4fc3f7;font-weight:700">14</td><td style="color:#4fc3f7;font-weight:700">SimPO</td><td style="color:#4fc3f7;font-weight:700">Score with the metric you decode with &mdash; skip the reference too</td></tr>
+<tr><td>7 &rarr; 15</td><td>GRPO &rarr; DAPO</td><td>Different branch: verifiable rewards, no preference pairs at all</td></tr>
+</table></div>
+<p style="margin-top:6px">All of chapters 5, 6 and 14 need <strong>human preference pairs</strong>. The moment a task has a checkable answer &mdash; maths, code, unit tests &mdash; the whole preference apparatus becomes unnecessary, and you are in <a href="7_grpo.html" style="color:#4fc3f7">chapter 7</a>&#x2019;s world instead. <a href="15_dapo.html" style="color:#4fc3f7">Chapter 15</a> is that branch at production scale.</p>
+</div>
+
+<div class="card">
+<h3>Sources</h3>
+    <p style="font-size:.88em">The <code>&minus;log sigmoid(&middot;)</code> shape SimPO inherits is the Bradley-Terry likelihood &mdash; derived from scratch in the optional aside <a href="5a_bradley_terry.html" style="color:#4fc3f7">5a</a>.</p>
+<p style="font-size:.88em">SimPO: Meng, Xia &amp; Chen, <em>SimPO: Simple Preference Optimization with a Reference-Free Reward</em>, <a href="https://arxiv.org/abs/2405.14734" style="color:#4fc3f7">arXiv:2405.14734</a> (NeurIPS 2024). All benchmark numbers, the &beta;/&gamma; ranges, the ~50% ranking-agreement measurement and the 1833-vs-1802 length figures are from that paper. The two-response worked example on pages 0&ndash;3 is constructed for this course &mdash; every number in it is hand-derivable.</p>
+</div>
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page');const nav=document.getElementById('nav');
+pages.forEach((p,i)=>{const b=document.createElement('button');b.textContent=p.dataset.t;b.onclick=()=>go(i);if(i===0)b.classList.add('on');nav.appendChild(b);});
+function go(n){pages.forEach((p,i)=>p.classList.toggle('on',i===n));nav.querySelectorAll('button').forEach((b,i)=>{b.classList.remove('on');if(i<n)b.classList.add('done');else b.classList.remove('done');if(i===n)b.classList.add('on');});window.scrollTo({top:0,behavior:'smooth'});}
+</script>
+</body>
+</html>

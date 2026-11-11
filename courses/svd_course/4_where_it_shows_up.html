@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SVD Ch4: Where you have already been using it</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em;max-width:780px;margin-left:auto;margin-right:auto}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:880px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+a.nx{display:inline-block;padding:10px 24px;background:#4caf50;color:#000;border-radius:8px;font-weight:700;font-size:.9em;margin-top:14px;text-decoration:none}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 10px;border:1px solid #333;text-align:left;font-size:.84em}
+th{background:#1a1a3a;color:#4fc3f7}
+.scroll{overflow-x:auto}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',Consolas,monospace;font-size:.84em;line-height:1.8;overflow-x:auto}
+.math .line{margin:2px 0;display:block;white-space:pre}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.math .kw{color:#c586c0}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math.out{border-left:3px solid #4caf50;background:#0d1a12}
+.outlabel{display:block;font-size:.72em;color:#4caf50;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.key{color:#ffb74d;font-weight:600}
+.inline{font-family:'Fira Code',Consolas,monospace;background:#1a1a2e;border:1px solid #333;border-radius:4px;padding:1px 6px;font-size:.86em;color:#9cdcfe}
+a{color:#4fc3f7}
+ul{margin-left:20px;margin-top:6px}li{margin:4px 0}
+details{margin-top:12px}
+details summary{cursor:pointer;color:#888;font-size:.85em;padding:8px 12px;background:#12122a;border:1px solid #333;border-radius:8px}
+details summary:hover{color:#ccc;border-color:#555}
+details[open] summary{color:#4fc3f7;border-color:#4fc3f7}
+details .card{margin-top:10px}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+
+<h1>SVD Chapter 4: Where You Have Already Been Using It</h1>
+<p class="sub">Four operations came out of chapters 1&ndash;3: count the directions, compare biggest to smallest, budget by &sigma;&sup2;, truncate. This chapter is the same four, wearing different clothes &mdash; PCA, LoRA, denoising, and the optimizer you already read.</p>
+
+<div class="nav" id="nav"></div>
+
+<!-- PAGE 0 -->
+<div class="page on" data-t="0. PCA">
+<h2>PCA is the SVD of your data, with the mean removed</h2>
+
+<div class="card blue">
+<h3>The setup, and the one preparatory step</h3>
+<p>Put your data in a matrix X: one <em>row</em> per sample, one <em>column</em> per feature. Subtract each column's mean &mdash; that is the only preparation, and it matters because SVD measures stretch <em>from the origin</em>, so an off-centre cloud would report its own position instead of its shape.</p>
+<p>Then take the SVD of the centred X and read off the pieces:</p>
+<div class="scroll"><table>
+<tr><th>SVD object</th><th>PCA name</th><th>meaning</th></tr>
+<tr><td>v&#7522; (rows of V&#7488;)</td><td><span class="key">principal component i</span></td><td>a direction in <em>feature</em> space along which the data spreads</td></tr>
+<tr><td>&sigma;&#7522;&sup2; / (n&minus;1)</td><td><span class="key">variance explained</span></td><td>how much of the spread lies along it</td></tr>
+<tr><td>U&middot;S columns</td><td><span class="key">scores</span></td><td>each sample's coordinate in the new basis</td></tr>
+</table></div>
+</div>
+
+<div class="card green">
+<h3>A run, so the correspondence is not just a claim</h3>
+<p>200 samples, 2 correlated features:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  singular values of centred X:  [<span class="val">32.767</span>, <span class="val">4.103</span>]</span>
+<span class="line">  variance explained:            [<span class="hl">98.5%</span>, 1.5%]</span>
+<span class="line">  first principal direction v&#8321; = [&minus;0.9008, &minus;0.4342]</span>
+<span class="line"></span>
+<span class="line">  eigenvalues of the covariance X&#7488;X/(n&minus;1):  [<span class="val">5.3953</span>, <span class="val">0.0846</span>]</span>
+<span class="line">  &sigma;&sup2;/(n&minus;1) from the SVD:                 [<span class="val">5.3953</span>, <span class="val">0.0846</span>]     <span class="hl">identical</span></span>
+</div>
+<p>Two features, but 98.5% of the variation lies along a single direction &mdash; so this data is really <em>one</em> number plus a little noise. That is chapter 3's "fast-decaying spectrum means structure," applied to data instead of to a matrix of weights.</p>
+<p><span class="key">Why practitioners use SVD rather than eigendecomposing the covariance:</span> forming <span class="inline">X&#7488;X</span> squares the condition number (chapter 3, page 1), so you throw away half your precision before you start. Running the SVD on X directly skips that. It is the same answer, computed more safely.</p>
+</div>
+<button class="nx" onclick="go(1)">Next: LoRA &rarr;</button>
+</div>
+
+<!-- PAGE 1 -->
+<div class="page" data-t="1. LoRA">
+<h2>LoRA: a bet that the update you need is low-rank</h2>
+
+<div class="card blue">
+<h3>The construction</h3>
+<p>Fine-tuning wants to add an update &Delta;W to a frozen weight W. LoRA never stores &Delta;W. It stores two thin matrices and multiplies them:</p>
+<div class="math">
+<span class="line">&Delta;W  =  B &middot; A          B is (d &times; r),   A is (r &times; d),   r &ll; d</span>
+<span class="line"></span>
+<span class="line">rank(BA) &le; min(rank B, rank A) &le; <span class="hl">r</span>      <span class="cmt"># the inner dimension caps it</span></span>
+</div>
+<p>So <span class="key">r is literally the rank</span> from chapter 3, chosen in advance. Verified on a toy: <span class="inline">B(50&times;8) @ A(8&times;50)</span> has shape 50&times;50 and rank exactly 8.</p>
+<p>The saving is the whole point:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run: one 4096&times;4096 weight</span>
+<span class="line">  full &Delta;W                      <span class="val">16,777,216</span> params</span>
+<span class="line">  r =  8   B+A =    65,536       <span class="hl">0.391%</span></span>
+<span class="line">  r = 16   B+A =   131,072       <span class="hl">0.781%</span></span>
+<span class="line">  r = 64   B+A =   524,288       <span class="hl">3.125%</span></span>
+</div>
+</div>
+
+<div class="card orange">
+<h3>Why it works at all &mdash; and what the bet is</h3>
+<p>Chapter 3 said a matrix is compressible exactly when its spectrum decays fast. LoRA's wager is that <span class="key">the &Delta;W fine-tuning needs has a fast-decaying spectrum</span> &mdash; that adapting a pretrained model is a low-dimensional change, not a rewrite. If true, a rank-r factorization loses almost nothing (Eckart&ndash;Young bounds the loss by &sigma;<sub>r+1</sub>). If false, no choice of r helps.</p>
+<p>Note the direction of the logic: LoRA does <em>not</em> compute an SVD. It fixes the rank up front and trains B and A directly. The SVD is what tells you <em>why</em> that could ever be enough &mdash; and what "r is too small" would look like (a spectrum still tall at index r).</p>
+<p>It also explains the standard practice of raising r when a task fails to fit: you are buying more directions. And why you cannot compare an r=8 adapter's capacity to a full fine-tune's &mdash; one is constrained to an 8-dimensional slice of the update space.</p>
+</div>
+<button class="nx" onclick="go(2)">Next: compression and denoising &rarr;</button>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page" data-t="2. Denoising">
+<h2>Compression and denoising are the same act, judged differently</h2>
+
+<div class="card">
+<h3>A signal with a known rank, buried in noise</h3>
+<p>Build a 40&times;40 matrix that is genuinely rank 2, add gaussian noise, and look at what the spectrum does:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  clean signal &sigma;:  [<span class="val">110.495</span>, <span class="val">15.674</span>,  0.000,  0.000,  0.000]      rank <span class="hl">2</span></span>
+<span class="line">  noisy        &sigma;:  [<span class="val">109.921</span>, <span class="val">15.795</span>,  <span class="val">4.739</span>,  <span class="val">4.312</span>,  <span class="val">4.109</span>]      rank 40</span>
+<span class="line">                     &#8598;&mdash;&mdash; signal &mdash;&mdash;&#8599;  &#8598;&mdash;&mdash; the noise floor &mdash;&mdash;&#8599;</span>
+</div>
+<p>The noise did two things: it barely moved the two real singular values, and it lifted every other one off zero to about 4.3. <span class="key">The gap between 15.8 and 4.7 is the signal/noise boundary, visible directly in the spectrum</span> &mdash; that "elbow" is what people are looking for when they plot singular values and squint.</p>
+</div>
+
+<div class="card green">
+<h3>Now truncate, and watch the error go the wrong way</h3>
+<div class="math out"><span class="outlabel">output &mdash; real run: reconstruct from the top k, compare to the CLEAN signal</span>
+<span class="line">  keep k= 1:  error = 16.112     <span class="cmt"># too few — a real direction is missing</span></span>
+<span class="line">  keep k= 2:  error =  <span class="hl">5.237</span>     <span class="cmt"># the true rank — best possible</span></span>
+<span class="line">  keep k= 3:  error =  7.064     <span class="cmt"># worse!</span></span>
+<span class="line">  keep k= 5:  error =  9.239</span>
+<span class="line">  keep k=10:  error = 12.375     <span class="cmt"># each extra direction re-adds noise</span></span>
+</div>
+<p>Past k=2, every direction you keep makes the answer <em>worse</em>. That is the striking part: throwing information away improves accuracy, because the information you threw away was noise. <span class="key">Truncating the SVD is a denoiser, and the optimal cut is at the elbow.</span></p>
+<p>Same operation, two names, depending on what you were after:</p>
+<div class="scroll"><table>
+<tr><th>you keep the top k because&hellip;</th><th>you call it</th></tr>
+<tr><td>you wanted the structure and don't want to store the rest</td><td><span class="key">compression</span></td></tr>
+<tr><td>you wanted the structure and believe the rest is corruption</td><td><span class="key">denoising</span></td></tr>
+<tr><td>you wanted the structure and the rest is other people's variation</td><td><span class="key">PCA</span> / dimensionality reduction</td></tr>
+</table></div>
+</div>
+<button class="nx" onclick="go(3)">Next: back to Muon &rarr;</button>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page" data-t="3. Muon & the map">
+<h2>Back to the optimizer &mdash; and the whole picture</h2>
+
+<div class="card blue">
+<h3>Muon, now readable line by line</h3>
+<p><a href="../optimizer_course/7_muon.html">Optimizer chapter 7</a> is an SVD chapter in disguise. With chapters 1&ndash;3 done, every step of it should now decode:</p>
+<div class="scroll"><table>
+<tr><th>Muon says</th><th>you now read it as</th></tr>
+<tr><td>"gradient updates are nearly rank-1"</td><td>the spectrum is [56.7, 0.82, 0.14] &mdash; one direction holds essentially all the energy (ch. 3 p2)</td></tr>
+<tr><td>"condition number is very high"</td><td>&kappa; = 411 &mdash; the output ellipse is a sliver (ch. 3 p1)</td></tr>
+<tr><td>"replace M with U&middot;V&#7488;"</td><td>set every &sigma; to 1: keep both rotations, delete the stretch (ch. 2 p0)</td></tr>
+<tr><td>"Newton&ndash;Schulz acts on singular values only"</td><td>p(USV&#7488;) = U&middot;&phi;(S)&middot;V&#7488;, because U&#7488;U = V&#7488;V = I (ch. 2 p0's identity, used twice)</td></tr>
+<tr><td>"the rare directions are drowned, not absent"</td><td>&sigma;&#8323; = 0.14 &ne; 0 &mdash; nonzero, so it is real signal at the wrong scale (ch. 3 p0)</td></tr>
+</table></div>
+<p>The one-sentence version: <span class="key">Muon computes the SVD's answer without computing the SVD</span>, because doing the decomposition per weight per step would be far too slow.</p>
+</div>
+
+<div class="card">
+<h3>Two more places it turns up</h3>
+<ul>
+<li><span class="key">Least squares and the pseudo-inverse.</span> To solve <span class="inline">Mx = b</span> when M isn't invertible, invert what you can: <span class="inline">M&#8314; = V S&#8314; U&#7488;</span>, where S&#8314; replaces each nonzero &sigma; by 1/&sigma; and leaves zeros alone. The zeros are the directions that were crushed &mdash; you cannot un-crush them, so the pseudo-inverse simply declines to. This is also why near-zero &sigma;'s are dangerous: 1/&sigma; explodes, which is chapter 3's condition number arriving as a concrete numerical failure.</li>
+<li><span class="key">Whitening.</span> Replace every &sigma; by 1 and the ellipse becomes a circle &mdash; &kappa; = 1, every direction equal. That is exactly what Muon does to a gradient, and what whitening does to data before training.</li>
+</ul>
+</div>
+
+<div class="card purple">
+<h3>The whole course, four lines</h3>
+<div class="scroll"><table>
+<tr><td>1</td><td>Every matrix maps the unit circle to an ellipse. Its four numbers (axes + lengths) are the matrix, re-expressed as behaviour instead of storage.</td></tr>
+<tr><td>2</td><td><span class="inline">M v&#7522; = &sigma;&#7522; u&#7522;</span>, stacked into columns, <em>is</em> <span class="inline">M = U S V&#7488;</span>. The &sigma;'s are &radic;eigenvalues of M&#7488;M &mdash; verified by hand: 45 and 5 &rarr; 6.7082 and 2.2361.</td></tr>
+<tr><td>3</td><td>Count them (rank), divide the biggest by the smallest (&kappa;), square them for a budget (&sigma;&sup2; sums to &#8214;M&#8214;&sup2;<sub>F</sub>), truncate them (best rank-k, error exactly &sigma;<sub>k+1</sub>).</td></tr>
+<tr><td>4</td><td>PCA, LoRA, compression, denoising, pseudo-inverse, whitening, Muon &mdash; each is one of those four operations wearing a domain's clothes.</td></tr>
+</table></div>
+</div>
+
+<div class="card orange">
+<h3>Questions worth being able to answer</h3>
+<div class="scroll"><table>
+<tr><th>question</th><th>one-line answer</th></tr>
+<tr><td>What is the SVD, in one sentence?</td><td>Every matrix is a rotation, then an axis-aligned stretch, then another rotation &mdash; equivalently, it maps the unit circle to an ellipse, and U, S, V are that ellipse's axes and lengths.</td></tr>
+<tr><td>Why does every matrix have one, when not every matrix has eigenvectors?</td><td>Because it comes from M&#7488;M, which is always square, symmetric and PSD &mdash; so real non-negative eigenvalues and perpendicular eigenvectors are guaranteed, even when M is non-square.</td></tr>
+<tr><td>Singular values vs eigenvalues?</td><td>Different questions. For our M: eigenvalues 3 and 5, singular values 6.7082 and 2.2361. They coincide only for symmetric PSD matrices. &sigma;&#7522; = &radic;&lambda;&#7522;(M&#7488;M).</td></tr>
+<tr><td>Why is truncating optimal?</td><td>Eckart&ndash;Young: no rank-k matrix is closer to M in Frobenius norm, and the error is exactly &sigma;<sub>k+1</sub> &mdash; checked here: &#8214;M &minus; A&#8321;&#8214; = 2.236068 = &sigma;&#8322;.</td></tr>
+<tr><td>How do you choose k?</td><td>Look for the elbow in the spectrum &mdash; the gap between signal and noise floor (110, 15.8 &#8214; 4.7, 4.3, 4.1). Or keep enough for a target share of &sum;&sigma;&sup2;.</td></tr>
+<tr><td>Why is PCA usually done by SVD instead of eigendecomposing the covariance?</td><td>Forming X&#7488;X squares the condition number, costing half your precision. SVD on X gives the same answer without that.</td></tr>
+<tr><td>What does a high condition number cost?</td><td>&kappa; = 10&#7503; loses roughly k digits; it also sets the zigzag rate for gradient descent, and &kappa;(A&#7488;A) = &kappa;(A)&sup2;.</td></tr>
+<tr><td>Why is a batch gradient low-rank?</td><td>It is a sum of B outer products (one per example), and rank(sum) &le; B &mdash; so a batch of 32 gives a 4096&times;4096 weight at most 32 directions.</td></tr>
+</table></div>
+</div>
+
+<div class="card">
+<h3>Where to go from here</h3>
+<div class="scroll"><table>
+<tr><th>from here</th><th>go to</th></tr>
+<tr><td>the optimizer that orthogonalizes gradients</td><td><a href="../optimizer_course/7_muon.html">Optimizer ch. 7 &mdash; Muon</a></td></tr>
+<tr><td>ill-conditioning as an optimization problem</td><td><a href="../optimizer_course/1_the_step.html">Optimizer ch. 1</a> and <a href="../optimizer_course/3_adaptive.html">ch. 3</a></td></tr>
+<tr><td>codebooks and latent structure</td><td><a href="../vae_course/5b_codebook.html">VAE ch. 5&frac12;</a></td></tr>
+</table></div>
+<p class="sub" style="text-align:left;margin-top:10px;color:#888">Every number in this course came from <span class="inline">M = [3 0; 4 5]</span> or from the small runs shown, computed with numpy 2.5.1; seeds are stated where randomness is used (PCA demo <span class="inline">default_rng(3)</span>, denoising <span class="inline">default_rng(7)</span>). Nothing here was quoted from memory &mdash; the hand computations and the runs agree at every step.</p>
+</div>
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page'),nav=document.getElementById('nav');
+pages.forEach((p,i)=>{const b=document.createElement('button');b.textContent=p.dataset.t;b.onclick=()=>go(i);if(i===0)b.classList.add('on');nav.appendChild(b);});
+function go(n){pages.forEach((p,i)=>p.classList.toggle('on',i===n));nav.querySelectorAll('button').forEach((b,i)=>{b.classList.remove('on');if(i<n)b.classList.add('done');else b.classList.remove('done');if(i===n)b.classList.add('on');});window.scrollTo({top:0,behavior:'smooth'});}
+</script>
+</body>
+</html>

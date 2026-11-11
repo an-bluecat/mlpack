@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Transformer Ch3b: RoPE</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:880px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 10px;border:1px solid #333;text-align:left;font-size:.86em}
+th{background:#1a1a3a;color:#4fc3f7}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',Consolas,monospace;font-size:.84em;line-height:1.8;overflow-x:auto}
+.math .line{margin:2px 0;display:block;white-space:pre}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.math .kw{color:#c586c0}
+.math .fn{color:#dcdcaa}
+.math.out{border-left:3px solid #4caf50;background:#0d1a12}
+.outlabel{display:block;font-size:.72em;color:#4caf50;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.key{color:#ffb74d;font-weight:600}
+.inline{font-family:'Fira Code',Consolas,monospace;background:#1a1a2e;border:1px solid #333;border-radius:4px;padding:1px 6px;font-size:.86em;color:#9cdcfe}
+details{margin-top:12px}
+details summary{cursor:pointer;color:#888;font-size:.85em;padding:8px 12px;background:#12122a;border:1px solid #333;border-radius:8px}
+details summary:hover{color:#ccc;border-color:#555}
+details[open] summary{color:#4fc3f7;border-color:#4fc3f7}
+details .card{margin-top:10px}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+
+<h1>Transformer Ch3b: RoPE</h1>
+<p class="sub">Rotary Position Embedding, built from a single 2D rotation. Every number on every page is from a real run.</p>
+
+<div class="nav" id="nav"></div>
+
+<!-- PAGE 0 -->
+<div class="page on" data-t="0. Where Ch3 left off">
+<h2>The trouble with stamps, seen up close — and RoPE's move</h2>
+
+<div class="card">
+<h3>What actually happens to an added stamp inside the score</h3>
+<p>Chapter 3 adds PE to the embedding: <span class="inline">x + PE(pos)</span>, once, at the bottom of the network. Push that through attention and watch what the score becomes:</p>
+<div class="math">
+<span class="line"><span class="lbl">q_m</span> = W_Q (x_m + PE(m))        <span class="lbl">k_n</span> = W_K (x_n + PE(n))</span>
+<span class="line"></span>
+<span class="line"><span class="cmt"># q_m · k_n expands into FOUR terms:</span></span>
+<span class="line">  (W_Q x_m)·(W_K x_n)        <span class="cmt"># content  × content     — what we want</span></span>
+<span class="line">+ (W_Q x_m)·(W_K PE(n))      <span class="cmt"># content  × position    — entangled</span></span>
+<span class="line">+ (W_Q PE(m))·(W_K x_n)      <span class="cmt"># position × content     — entangled</span></span>
+<span class="line">+ (W_Q PE(m))·(W_K PE(n))    <span class="cmt"># position × position    — depends on m AND n separately</span></span>
+</div>
+<p>Position and content arrive <span class="key">pre-mixed</span>, and the position-only term sees two absolute stamps — it has to <em>infer</em> the offset m−n through whatever W_Q and W_K learned. On top of that, the stamp is applied once at layer 0: by layer 30 the residual stream carries position only to the degree the network bothered to preserve it.</p>
+</div>
+
+<div class="card green">
+<h3>RoPE's move: stop stamping the token — rotate q and k at the moment of scoring</h3>
+<div class="math">
+<span class="line"><span class="cmt"># 1. Q and K are computed from CONTENT alone — nothing added to x</span></span>
+<span class="line"><span class="cmt"># 2. rotate q by (its position m) · θ,  rotate k by (its position n) · θ</span></span>
+<span class="line"><span class="cmt"># 3. take the dot product as usual</span></span>
+<span class="line"></span>
+<span class="line"><span class="lbl">score(m, n)</span> = R(mθ) q  ·  R(nθ) k</span>
+</div>
+<p>Why rotation, of all operations? Because of a fact about dot products that the next page derives and verifies with numbers: <span class="key">a dot product depends only on the two vectors' lengths and the angle between them</span> — nothing else. Rotation changes neither length; and if q turns by m·θ while k turns by n·θ, the angle <em>between</em> them changes by exactly (m−n)·θ. <span class="key">Absolute position cancels in the geometry itself</span> — no learning required. Bonus: this happens inside attention, so it is re-applied <em>fresh at every layer</em>, and the residual stream / V vectors stay pure content.</p>
+<p>The rest of the chapter builds this from one 2D rotation, by hand, then shows the exact code Llama ships.</p>
+</div>
+<button class="nx" onclick="go(1)">One 2D rotation →</button>
+</div>
+
+<!-- PAGE 1 -->
+<div class="page" data-t="1. One 2D rotation">
+<h2>The whole mechanism is one fact about rotating and dotting</h2>
+
+<div class="card blue">
+<h3>Rotate a 2D vector — length never changes, only direction</h3>
+<div class="math">
+<span class="line"><span class="lbl">R(θ) [a, b]</span> = [a·cosθ − b·sinθ,   a·sinθ + b·cosθ]</span>
+</div>
+<div class="math out"><span class="outlabel">output — real run</span>
+<span class="line">R(30) @ [3,4] = [0.598 4.964]   |v| before: 5.0  after: 5.0</span>
+</div>
+<svg viewBox="0 0 760 310" style="width:100%;max-width:760px;display:block;margin:14px auto" font-family="'Segoe UI',system-ui,sans-serif" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<marker id="rB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4fc3f7"/></marker>
+<marker id="rP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ce93d8"/></marker>
+</defs>
+<circle cx="230" cy="170" r="110" fill="none" stroke="#2a2a4a" stroke-width="1"/>
+<line x1="100" y1="170" x2="360" y2="170" stroke="#222"/>
+<line x1="230" y1="40" x2="230" y2="300" stroke="#222"/>
+<line x1="230" y1="170" x2="296" y2="82" stroke="#4fc3f7" stroke-width="2.5" marker-end="url(#rB)"/>
+<text x="312" y="76" font-size="12.5" fill="#4fc3f7">[3, 4]   (53.1°)</text>
+<line x1="230" y1="170" x2="243.2" y2="60.7" stroke="#ce93d8" stroke-width="2.5" marker-end="url(#rP)"/>
+<text x="240" y="46" font-size="12.5" fill="#ce93d8">[0.598, 4.964]   (83.1°)</text>
+<path d="M 274 111 A 73 73 0 0 0 239.8 98.4" fill="none" stroke="#ffb74d" stroke-width="1.6" stroke-dasharray="4,3"/>
+<text x="286" y="104" font-size="12" fill="#ffb74d">+30°</text>
+<text x="560" y="120" text-anchor="middle" font-size="12.5" fill="#e0e0e0">the tip slides along the circle —</text>
+<text x="560" y="142" text-anchor="middle" font-size="12.5" fill="#e0e0e0">radius (length 5.0) is untouched.</text>
+<text x="560" y="176" text-anchor="middle" font-size="12.5" fill="#9aa0b5">a rotation stores an angle</text>
+<text x="560" y="198" text-anchor="middle" font-size="12.5" fill="#9aa0b5">without touching the magnitude —</text>
+<text x="560" y="220" text-anchor="middle" font-size="12.5" fill="#9aa0b5">perfect for adding position info</text>
+<text x="560" y="242" text-anchor="middle" font-size="12.5" fill="#9aa0b5">without changing what the vector says</text>
+</svg>
+</div>
+
+<div class="card green">
+<h3>The one fact everything rests on — verified, not asserted</h3>
+<div class="math">
+<span class="line"><span class="lbl">R(α)q · R(β)k  =  q · R(β−α)k</span>      <span class="cmt"># the dot product sees only the GAP β−α</span></span>
+</div>
+<div class="math out"><span class="outlabel">output — real run: q=[3,4], k=[1,2]</span>
+<span class="line">R(60)q @ R(30)k = 10.526</span>
+<span class="line">q @ R(-30)k     = 10.526    (rotate k by the DIFFERENCE only — identical)</span>
+<span class="line">R(90)q @ R(60)k = 10.526    (both shifted +30 deg: same gap, same score)</span>
+<span class="line">R(60)q @ R(60)k = 11.0      (gap 0 = plain q@k = 11.0)</span>
+</div>
+<p>Read the four lines as a story: rotate q by 60° and k by 30° — or don't touch q and rotate k by −30° — or shift <em>both</em> up by 30° — the score refuses to move. Only closing the gap to zero changes it (to plain q·k). <span class="key">The dot product is a gap-meter.</span> Now rename the angles: α = m·θ, β = n·θ, and "gap" becomes "how many tokens apart" — that's the entire trick.</p>
+</div>
+
+<div class="card orange">
+<h3>WHY the score only sees the gap — the two missing lines, with this page's own numbers</h3>
+<p>Step 1: a dot product has a second formula. Besides "multiply matching entries and sum," it equals <span class="inline">|q| · |k| · cos(angle between them)</span>. Check it on our vectors — no rotations yet:</p>
+<div class="math out"><span class="outlabel">output — real run</span>
+<span class="line">q=[3,4]: length 5.000, pointing at 53.13°     k=[1,2]: length 2.236, pointing at 63.43°</span>
+<span class="line">angle between = 63.43° − 53.13° = 10.31°</span>
+<span class="line">5.000 · 2.236 · cos(10.31°) = 11.000  =  3·1 + 4·2 = q·k   ✓</span>
+</div>
+<p>So the score is built from exactly three ingredients: <span class="key">two lengths and one angle-between</span>. Nothing else enters.</p>
+<p>Step 2: now rotate, and track each ingredient. Rotation never changes a length (page top: 5.0 stayed 5.0). It only moves the pointing directions — q's by α, k's by β — so the angle <em>between</em> moves by β−α:</p>
+<div class="math">
+<span class="line">angle between, after  =  (63.43° + β) − (53.13° + α)  =  10.31° + (β − α)      <span class="cmt"># α and β survive only as their difference</span></span>
+</div>
+<div class="math out"><span class="outlabel">output — real run: α=60°, β=30°</span>
+<span class="line">new angle between = 10.31° + (30° − 60°) = −19.69°</span>
+<span class="line">5.000 · 2.236 · cos(−19.69°) = <span class="hl">10.526</span>     ← the exact number the table above measured</span>
+</div>
+<p>That's the whole proof: lengths can't carry position (rotation doesn't touch them), so position can only enter through the one angle — and there the absolute parts subtract away before cos ever sees them. <span class="key">The identity isn't a lucky algebra fact; it's the only thing a length-preserving map could possibly do.</span></p>
+<details><summary>The same proof in matrix language (one line, for the algebra-minded)</summary>
+<div class="card"><p><span class="inline">R(α)q · R(β)k = qᵀR(α)ᵀR(β)k</span>, and <span class="inline">R(α)ᵀ = R(−α)</span> — the transpose of a rotation is the rotation back (verified: <span class="inline">R(60)ᵀ == R(−60)</span> exactly). So the middle collapses: <span class="inline">R(−α)R(β) = R(β−α)</span>, giving <span class="inline">q · R(β−α)k</span>. Undo q's rotation onto k, and only the difference remains — same conclusion, zero geometry.</p></div></details>
+</div>
+<button class="nx" onclick="go(2)">The full d=4 walkthrough →</button>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page" data-t="2. Full d=4 walkthrough">
+<h2>RoPE on a real head, every digit by hand (d=4)</h2>
+
+<div class="card orange">
+<h3>First, the question page 0 left open: q has 4 dimensions — what does "rotate q" even mean?</h3>
+<p>Page 1's rotation lives in a <em>plane</em>: it needs exactly two coordinates to mix. There is no such thing as rotating a 4-D vector "by one angle" — a 4-D rotation is, always, a collection of independent 2-D rotations in perpendicular planes. So to rotate a d-dim vector you must first <span class="key">choose which coordinates pair up into planes</span>:</p>
+<div class="math">
+<span class="line">d=4 vector [a, b, c, d]  →  plane 1: (a,b)   plane 2: (c,d)      <span class="cmt"># one 2×2 rotation each</span></span>
+<span class="line">                                                                   <span class="cmt"># (which dims pair up is a CONVENTION — page 4 shows the other choice)</span></span>
+</div>
+<p>What looks like a constraint is the design opportunity: <span class="key">each plane can turn at its own speed</span>. d dimensions = d/2 planes = d/2 independent clock hands — and the next page is entirely about why you want many speeds. The speeds themselves come straight from Ch3's sinusoidal frequency ladder, same base 10000, same geometric spacing: <span class="inline">θ_i = 10000^(−2i/d)</span>.</p>
+</div>
+
+<div class="card">
+<h3>Setup: "the cat" — 2 tokens, head dimension 4, two rotation speeds</h3>
+<div class="math">
+<span class="line"><span class="cmt"># after W_Q / W_K projections — content only, position hasn't entered yet:</span></span>
+<span class="line"><span class="lbl">q_1</span> = [2.0, 1.0, 0.5, 1.5]     <span class="cmt"># query for "cat", sitting at position m=1</span></span>
+<span class="line"><span class="lbl">k_0</span> = [0.5, 1.5, 2.0, 0.5]     <span class="cmt"># key for "the",  sitting at position n=0</span></span>
+<span class="line"></span>
+<span class="line"><span class="cmt"># d=4 -> two 2D pairs: dims (0,1) and dims (2,3), each with its own speed:</span></span>
+<span class="line"><span class="lbl">θ_0</span> = 10000^(−0/4) = <span class="val">1.0</span>       <span class="cmt"># pair 0: fast — 1 radian per position</span></span>
+<span class="line"><span class="lbl">θ_1</span> = 10000^(−2/4) = <span class="val">0.01</span>      <span class="cmt"># pair 1: slow — 0.01 radian per position</span></span>
+</div>
+</div>
+
+<div class="card blue">
+<h3>Rotate q_1 (position 1: pair 0 turns 1 rad, pair 1 turns 0.01 rad)</h3>
+<div class="math">
+<span class="line"><span class="cmt"># pair 0 = [2.0, 1.0], angle 1·θ_0 = 1 rad:   cos=0.5403, sin=0.8415</span></span>
+<span class="line">[2·0.5403 − 1·0.8415,  2·0.8415 + 1·0.5403] = [<span class="val">0.239</span>, <span class="val">2.223</span>]</span>
+<span class="line"></span>
+<span class="line"><span class="cmt"># pair 1 = [0.5, 1.5], angle 1·θ_1 = 0.01 rad: cos=1.0000, sin=0.0100</span></span>
+<span class="line">[0.5·1.0000 − 1.5·0.0100,  0.5·0.0100 + 1.5·1.0000] = [<span class="val">0.485</span>, <span class="val">1.505</span>]</span>
+<span class="line"></span>
+<span class="line"><span class="lbl">q̃_1</span> = [<span class="hl">0.239, 2.223, 0.485, 1.505</span>]</span>
+<span class="line"><span class="lbl">k̃_0</span> = [<span class="hl">0.5, 1.5, 2.0, 0.5</span>]        <span class="cmt"># position 0: angle 0 → rotation is the identity</span></span>
+</div>
+<p>Note what position 1 did: the fast pair swung 57°, the slow pair crept 0.6°. Ch3's multi-speed ruler set, reborn as <span class="key">clock hands</span>.</p>
+</div>
+
+<div class="card green">
+<h3>The score — and the proof that only the gap matters</h3>
+<div class="math">
+<span class="line"><span class="lbl">score(1→0)</span> = q̃_1 · k̃_0 = 0.239·0.5 + 2.223·1.5 + 0.485·2.0 + 1.505·0.5 ≈ <span class="val">5.177</span></span>
+</div>
+<p>Now the punchline. Move the same two tokens to positions 51→50, or 501→500 — fifty or five hundred seats down the theater, same one-seat gap:</p>
+<div class="math out"><span class="outlabel">output — real run</span>
+<span class="line">rope(q1, pos=1) = [0.239 2.223 0.485 1.505]     &lt;- the hand math, confirmed</span>
+<span class="line">score(1 -> 0)   = 5.177</span>
+<span class="line">score(51 -> 50) = 5.177   &lt;- same gap, same score</span>
+<span class="line">score(501->500) = 5.177</span>
+<span class="line">score unrotated q1@k0 = 4.25    &lt;- for reference: no position at all</span>
+</div>
+<p><span class="key">5.177 everywhere.</span> A head that learns "the token one seat back modifies me" learns it once, for every seat in every future context length. This is what "relative position, by construction" means in numbers.</p>
+</div>
+<button class="nx" onclick="go(3)">Why many speeds →</button>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page" data-t="3. Multi-speed hands">
+<h2>d/2 clock hands, geared from "seconds" to "years"</h2>
+
+<div class="card blue">
+<h3>Watch two hands after the same 3 steps</h3>
+<svg viewBox="0 0 760 300" style="width:100%;max-width:760px;display:block;margin:14px auto" font-family="'Segoe UI',system-ui,sans-serif" xmlns="http://www.w3.org/2000/svg">
+<circle cx="190" cy="140" r="86" fill="none" stroke="#2a2a4a"/>
+<text x="190" y="30" text-anchor="middle" font-size="12.5" fill="#4fc3f7">pair 0 — θ = 1 rad / step (fast)</text>
+<line x1="190" y1="140" x2="276" y2="140" stroke="#555" stroke-width="1.5"/>
+<text x="284" y="144" font-size="10.5" fill="#888">pos 0</text>
+<line x1="190" y1="140" x2="236.5" y2="67.6" stroke="#4fc3f7" stroke-width="1.5" opacity="0.4"/>
+<text x="242" y="62" font-size="10.5" fill="#4fc3f7" opacity="0.6">pos 1</text>
+<line x1="190" y1="140" x2="154.2" y2="61.8" stroke="#4fc3f7" stroke-width="1.5" opacity="0.65"/>
+<text x="146" y="52" font-size="10.5" fill="#4fc3f7" opacity="0.8">pos 2</text>
+<line x1="190" y1="140" x2="104.9" y2="127.9" stroke="#4fc3f7" stroke-width="2.5"/>
+<text x="96" y="118" font-size="11.5" fill="#4fc3f7">pos 3</text>
+<text x="190" y="262" text-anchor="middle" font-size="11" fill="#9aa0b5">3 steps swept 172° — pins exact neighbors,</text>
+<text x="190" y="280" text-anchor="middle" font-size="11" fill="#9aa0b5">but wraps around every ~6 positions</text>
+<circle cx="560" cy="140" r="86" fill="none" stroke="#2a2a4a"/>
+<text x="560" y="30" text-anchor="middle" font-size="12.5" fill="#ef5350">pair 32 (d=128) — θ = 0.01 rad / step (slow)</text>
+<line x1="560" y1="140" x2="646" y2="140" stroke="#555" stroke-width="1.5"/>
+<line x1="560" y1="140" x2="645.99" y2="139.1" stroke="#ef5350" stroke-width="1.5" opacity="0.4"/>
+<line x1="560" y1="140" x2="645.98" y2="138.3" stroke="#ef5350" stroke-width="1.5" opacity="0.65"/>
+<line x1="560" y1="140" x2="645.96" y2="137.4" stroke="#ef5350" stroke-width="2.5"/>
+<text x="560" y="170" text-anchor="middle" font-size="11" fill="#ef5350">pos 0..3 — all four hands</text>
+<text x="560" y="186" text-anchor="middle" font-size="11" fill="#ef5350">stacked at 3 o'clock</text>
+<text x="560" y="262" text-anchor="middle" font-size="11" fill="#9aa0b5">3 steps swept 1.7° — useless for neighbors,</text>
+<text x="560" y="280" text-anchor="middle" font-size="11" fill="#9aa0b5">but won't wrap for ~628 positions: the long-range ruler</text>
+</svg>
+<p>Every pair of dimensions is one hand; d=128 gives 64 hands, geared geometrically. The real gearing, computed:</p>
+<div class="math out"><span class="outlabel">output — real run, d=128</span>
+<span class="line">pair  0: theta = 1.000000   full turn every       6.3 positions</span>
+<span class="line">pair  1: theta = 0.865964   full turn every       7.3 positions</span>
+<span class="line">pair  8: theta = 0.316228   full turn every      19.9 positions</span>
+<span class="line">pair 32: theta = 0.010000   full turn every     628.3 positions</span>
+<span class="line">pair 63: theta = 0.000115   full turn every   54410.1 positions</span>
+</div>
+<p>Fast hands wrap quickly — past ~6 tokens, pair 0 has lapped and its angle is ambiguous on its own. That's fine: for a gap of 300, pair 0 is noise but pair 32 has turned a crisp, readable 172°. <span class="key">Every distance is some hand's specialty.</span> (Exactly the seconds-hand / hours-hand division of labor — and the same geometric frequency ladder as Ch3's sinusoids, because RoPE kept the base 10000.)</p>
+</div>
+
+<div class="card orange">
+<h3>A side effect worth knowing: scores tend to decay with distance</h3>
+<p>As the gap grows, more and more hands point in unrelated directions, and their contributions to the dot product start canceling <em>on average</em>. Result: a soft built-in preference for nearby tokens — not a window, not a rule, a statistical tilt the model can amplify or fight with W_Q/W_K. Same flavor as the noisy decay curve you saw for sinusoidal PE in Ch3 page 2 (and same caveat: it's an average over many hands, not a per-hand guarantee).</p>
+</div>
+<button class="nx" onclick="go(4)">The code that actually ships →</button>
+</div>
+
+<!-- PAGE 4 -->
+<div class="page" data-t="4. The shipped code">
+<h2>rotate_half — the 6 lines you'll meet in every Llama-style codebase</h2>
+
+<div class="card purple">
+<h3>Real implementations don't loop over pairs — they rotate everything at once</h3>
+<p>Our walkthrough paired <em>adjacent</em> dims (0,1), (2,3). Llama-family code instead pairs dim j with dim j+d/2 — pair (0,2), (1,3) at d=4 — because then the whole rotation is two vectorized multiplies and one flip, no loop:</p>
+<div class="math">
+<span class="line"><span class="kw">def</span> <span class="fn">rope_rotate_half</span>(vec, pos, d=<span class="val">4</span>):</span>
+<span class="line">    i = np.arange(d // <span class="val">2</span>)</span>
+<span class="line">    ang = pos * <span class="val">10000</span> ** (<span class="val">-2</span> * i / d)                  <span class="cmt"># one angle per pair</span></span>
+<span class="line">    cos = np.concatenate([np.cos(ang), np.cos(ang)])    <span class="cmt"># broadcast to full width</span></span>
+<span class="line">    sin = np.concatenate([np.sin(ang), np.sin(ang)])</span>
+<span class="line">    rotated = np.concatenate([-vec[d // <span class="val">2</span>:], vec[:d // <span class="val">2</span>]])   <span class="cmt"># "rotate_half"</span></span>
+<span class="line">    <span class="kw">return</span> vec * cos + rotated * sin                    <span class="cmt"># = the 2x2 rotations, vectorized</span></span>
+</div>
+<p>Claim: this IS the per-pair rotation, just under the (j, j+d/2) pairing. Don't take the comment's word — expand what the last line computes for entry 0 and entry 2 (the pair (0,2) at d=4), writing a=vec[0], c=vec[2], θ=ang[0]:</p>
+<div class="math">
+<span class="line">entry 0:   vec[0]·cos[0] + rotated[0]·sin[0]  =  a·cosθ + (<span class="hl">−c</span>)·sinθ   =  a·cosθ − c·sinθ   <span class="cmt"># rotation, row 1 ✓</span></span>
+<span class="line">entry 2:   vec[2]·cos[2] + rotated[2]·sin[2]  =  c·cosθ + (<span class="hl">a</span>)·sinθ    =  c·cosθ + a·sinθ   <span class="cmt"># rotation, row 2 ✓</span></span>
+<span class="line"></span>
+<span class="line"><span class="cmt"># the flip-and-negate ("rotate_half") plants −c where entry 0 needs it and a where entry 2 needs it —</span></span>
+<span class="line"><span class="cmt"># that placement IS the 2×2 rotation matrix, written as elementwise ops.  (cos[0]=cos[2]: same plane, same angle.)</span></span>
+</div>
+<p>Same expansion works for the pair (1,3) with ang[1]. Now verify against an explicit 2×2 loop with the same pairing, then re-check the only property that matters:</p>
+<div class="math out"><span class="outlabel">output — real run</span>
+<span class="line">rotate_half     (pos=7): [1.1793 0.8926 1.6909 1.5663]</span>
+<span class="line">explicit 2x2    (pos=7): [1.1793 0.8926 1.6909 1.5663]     &lt;- identical</span>
+<span class="line">rotate_half score(1->0)   = 6.469</span>
+<span class="line">rotate_half score(51->50) = 6.469    &lt;- shift-invariance holds in this pairing too</span>
+</div>
+</div>
+
+<div class="card red">
+<h3>Spot the trap: 6.469 ≠ page 2's 5.177 — and that's correct</h3>
+<p>Same q, same k, same positions — different score. Why? Because the two conventions <span class="key">group different dims into pairs</span>: adjacent-pairing rotated [2.0, 1.0] together; half-pairing rotates [2.0, 0.5] together. Both are perfectly valid RoPEs — each is internally consistent, each is shift-invariant (you just saw it). But they are <em>different functions</em>. The classic real-world bug hides here: <span class="key">porting weights between codebases that pair differently</span> (HF Transformers vs original Meta checkpoints famously disagreed) silently scrambles every attention score while nothing crashes. If a converted model babbles, this is one of the first things to check.</p>
+</div>
+
+<details><summary>Refresher: why is it applied to q and k but never to v?</summary>
+<div class="card"><p>Position should decide <span class="key">where to look, not what you get</span>. Scores (q·k) route attention, so position belongs there. V is the payload being averaged — rotate it and you'd corrupt the content itself by its sender's seat number, and the output of a head would change under pure translation of the sequence. Leaving V clean keeps "what the token says" independent of "where it sat", which is exactly the invariance we built.</p></div></details>
+<button class="nx" onclick="go(5)">Verdict & stretching context →</button>
+</div>
+
+<!-- PAGE 5 -->
+<div class="page" data-t="5. Verdict & long context">
+<h2>Why RoPE won, and how its one knob stretches context</h2>
+
+<div class="card">
+<h3>The three-way comparison, corrected and current</h3>
+<table>
+<tr><th></th><th>Sinusoidal (add)</th><th>Learned absolute (add)</th><th>RoPE (rotate)</th></tr>
+<tr><td>position enters</td><td>layer 0, once</td><td>layer 0, once</td><td>inside attention, <span class="key">every layer</span></td></tr>
+<tr><td>score sees</td><td>two absolute stamps, entangled with content</td><td>two absolute stamps</td><td>the offset m−n, by construction</td></tr>
+<tr><td>beyond train length</td><td>vectors exist, model unprepared</td><td>table ends — nothing exists</td><td>gaps it has seen keep working; only unseen <em>gaps</em> fail</td></tr>
+<tr><td>parameters</td><td>0</td><td>max_len × d</td><td>0</td></tr>
+<tr><td>V / residual stream</td><td>carries position</td><td>carries position</td><td><span class="key">pure content</span></td></tr>
+<tr><td>ships in</td><td>the 2017 original</td><td>BERT, GPT-2/3</td><td>Llama 1–3, Mistral, Qwen, DeepSeek, Gemma — the 2026 default</td></tr>
+</table>
+</div>
+
+<div class="card green">
+<h3>Long context: the failure is precise, so the fix is a knob</h3>
+<p>Train at 4K, run at 32K: a token attending 20,000 back needs a <em>gap</em> no hand-combination was ever trained to read — slow hands are in never-seen territory. But notice the failure lives entirely in <span class="key">the θ schedule</span>, one formula with one base. So the fixes just re-gear the clock: scale positions down so old gaps cover the new range (position interpolation), or re-tune the base so slow hands turn slower still (NTK-aware scaling, <span class="key">YaRN</span>, LongRoPE). That's how 128K-context Llama/Qwen variants ship: same weights, re-geared hands, brief finetune. No absolute-PE scheme offers a knob like this — that, plus zero parameters and clean V, is why RoPE won.</p>
+</div>
+
+<div class="card blue">
+<h3>The whole chapter in four lines</h3>
+<table>
+<tr><td>1</td><td>a dot product is a gap-meter: R(α)q·R(β)k = q·R(β−α)k — verified at 10.526 three ways</td></tr>
+<tr><td>2</td><td>set α = m·θ: score(1→0) = score(51→50) = score(501→500) = 5.177 — relative position by construction</td></tr>
+<tr><td>3</td><td>d/2 hands geared 6.3 → 54,410 positions/turn: every distance is some hand's specialty</td></tr>
+<tr><td>4</td><td>shipped as rotate_half; pairing conventions differ between codebases — the silent porting bug</td></tr>
+</table>
+</div>
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page'),nav=document.getElementById('nav');
+pages.forEach((p,i)=>{const b=document.createElement('button');b.textContent=p.dataset.t;b.onclick=()=>go(i);if(i===0)b.classList.add('on');nav.appendChild(b);});
+function go(n){pages.forEach((p,i)=>p.classList.toggle('on',i===n));nav.querySelectorAll('button').forEach((b,i)=>{b.classList.remove('on');if(i<n)b.classList.add('done');else b.classList.remove('done');if(i===n)b.classList.add('on');});window.scrollTo({top:0,behavior:'smooth'});}
+</script>
+</body>
+</html>

@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Muon — stop treating the matrix as a bag of scalars</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:880px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+a.nx{display:inline-block;padding:10px 24px;background:#4caf50;color:#000;border-radius:8px;font-weight:700;font-size:.9em;margin-top:14px;text-decoration:none}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 10px;border:1px solid #333;text-align:left;font-size:.84em}
+th{background:#1a1a3a;color:#4fc3f7}
+td.num{font-family:'Fira Code',Consolas,monospace;text-align:right}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',Consolas,monospace;font-size:.84em;line-height:1.8;overflow-x:auto}
+.math .line{margin:2px 0;display:block;white-space:pre}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.math .kw{color:#c586c0}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math.out{border-left:3px solid #4caf50;background:#0d1a12}
+.outlabel{display:block;font-size:.72em;color:#4caf50;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.key{color:#ffb74d;font-weight:600}
+.inline{font-family:'Fira Code',Consolas,monospace;background:#1a1a2e;border:1px solid #333;border-radius:4px;padding:1px 6px;font-size:.86em;color:#9cdcfe}
+ul{margin-left:20px;margin-top:6px}
+li{margin:4px 0}
+details{margin-top:12px}
+details summary{cursor:pointer;color:#888;font-size:.85em;padding:8px 12px;background:#12122a;border:1px solid #333;border-radius:8px}
+details summary:hover{color:#ccc;border-color:#555}
+details[open] summary{color:#4fc3f7;border-color:#4fc3f7}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+
+<h1>Muon — stop treating the matrix as a bag of scalars</h1>
+<p class="sub">Chapter 7. Six chapters of optimizers, and every one of them looks at a weight matrix and sees only its individual entries. This chapter is what becomes visible when you look at the matrix — and the first optimizer since Adam to win real LLM pretraining races.</p>
+
+<!-- muon-story-link:start -->
+<p style="text-align:center;margin:0 auto 18px;font-size:.88em"><a href="7_muon_story.html" style="color:#4fc3f7">Start with the standalone story: Muon, one step at a time →</a></p>
+<!-- muon-story-link:end -->
+<div class="nav" id="nav"></div>
+
+<!-- PAGE 0 -->
+<div class="page on" data-t="0. The blind spot">
+<h2>What every previous chapter had in common — and couldn't see</h2>
+
+<div class="card blue">
+<h3>Elementwise, all the way down</h3>
+<p>Write any update from chapters 1–6 for a weight <em>matrix</em> W and the honest notation is:</p>
+<div class="math">
+<span class="line">for every entry (i,j) INDEPENDENTLY:   W[i,j] ← W[i,j] − lr · step(g[i,j], its own history)</span>
+</div>
+<p>Adam keeps two numbers per entry; LaProp reorders a division per entry; none of them ever asks how entry (0,1) relates to entry (2,3). <span class="key">The matrix is treated as a bag of unrelated scalars that happen to be stored in a grid.</span></p>
+<p>But the grid is not storage — it's a <em>function</em>: W maps an input vector to an output vector, <span class="inline">y = W·x</span>. Functions have properties no single entry owns: which input directions get amplified, which get ignored. The claim of this chapter: <span class="key">gradient updates for W have extreme, invisible structure at that level</span> — and fixing it is worth ~2× in compute.</p>
+</div>
+
+<div class="card">
+<h3>The plan, so nothing arrives unannounced</h3>
+<ul>
+<li>Page 1: see the structure — a real gradient matrix is <em>nearly rank-1</em>, and momentum makes it worse.</li>
+<li>Page 2: state the wish, which is chapter 3's wish one level up — equalize per <em>direction</em>, not per entry.</li>
+<li>Page 3: the trick that grants it without an SVD — Newton–Schulz, five matmuls.</li>
+<li>Pages 4–5: the assembled optimizer, its exclusions and costs, and the production receipts.</li>
+</ul>
+</div>
+<button class="nx" onclick="go(1)">Next: see the structure in a real gradient</button>
+</div>
+
+<!-- PAGE 1 -->
+<div class="page" data-t="1. Gradients have directions">
+<h2>A weight-matrix gradient is a stack of outer products &mdash; and it's lopsided</h2>
+
+<div class="card">
+<h3>Step 1a &mdash; one single entry, by the chain rule</h3>
+<p>Before any matrix talk: what <em>is</em> the gradient of one weight? Take a linear layer <span class="inline">y = W&middot;x</span> with W of shape 3&times;4 (3 outputs, 4 inputs). Write out one output:</p>
+<div class="math">
+<span class="line">y[0] = W[0,0]&middot;x[0] + <span class="hl">W[0,1]&middot;x[1]</span> + W[0,2]&middot;x[2] + W[0,3]&middot;x[3]</span>
+</div>
+<p>Now ask for <span class="inline">&part;L/&part;W[0,1]</span>. Two factors, and that's all:</p>
+<div class="math">
+<span class="line"><span class="lbl">&part;y[0] / &part;W[0,1]</span> = x[1]      <span class="cmt"># W[0,1] multiplies x[1] and appears nowhere else</span></span>
+<span class="line"><span class="lbl">&part;L    / &part;y[0]  </span> = e[0]      <span class="cmt"># this IS what "the error signal at output 0" means</span></span>
+<span class="line"></span>
+<span class="line">chain rule:  <span class="hl">&part;L/&part;W[i,j] = e[i] &middot; x[j]</span>      <span class="cmt"># an output's error times the input it multiplied</span></span>
+</div>
+<p>With x = [1.0, 0.5, &minus;0.3, 0.8] and e = [2.0, &minus;1.0, 0.5]: <span class="inline">&part;L/&part;W[0,1] = 2.0 &times; 0.5 = 1.0</span>. Nothing matrix-shaped has happened yet &mdash; this is one number.</p>
+</div>
+
+<div class="card blue">
+<h3>Step 1b &mdash; do that for all 12 entries and a multiplication table appears</h3>
+<p>The rule <span class="inline">e[i]&middot;x[j]</span> has to be evaluated for every (i,j). Lay it out as a grid, rows labelled by e, columns by x:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">              x=   1.0      0.5     -0.3      0.8</span>
+<span class="line">   e =  2.0        2.000    1.000   -0.600    1.600</span>
+<span class="line">   e = -1.0       -1.000   -0.500    0.300   -0.800</span>
+<span class="line">   e =  0.5        0.500    0.250   -0.150    0.400</span>
+</div>
+<p>That grid &mdash; every entry of one vector times every entry of another &mdash; is exactly what <span class="key">the outer product</span> <span class="inline">e&middot;x&#7488;</span> means. It is not a new operation to learn; it is the multiplication table you just built, given a name. So for one training example:</p>
+<div class="math"><span class="line">grad W  (from one example)  =  <span class="hl">e &middot; x&#7488;</span>       <span class="cmt"># shape (3&times;1)(1&times;4) = 3&times;4, same shape as W ✓</span></span></div>
+</div>
+
+<div class="card orange">
+<h3>Step 1c &mdash; look at that grid again: every row is the SAME vector, rescaled</h3>
+<p>This is the step everything later depends on, so read the rows, not the entries:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  row 0 = [ 2.00  1.00  -0.60   1.60]  =  <span class="hl">  2.0 &times; x</span></span>
+<span class="line">  row 1 = [-1.00 -0.50   0.30  -0.80]  =  <span class="hl"> -1.0 &times; x</span></span>
+<span class="line">  row 2 = [ 0.50  0.25  -0.15   0.40]  =  <span class="hl">  0.5 &times; x</span></span>
+<span class="line"></span>
+<span class="line">  divide row-by-row and the ratio is CONSTANT along each row:</span>
+<span class="line">     row1/row0 = [-0.5 -0.5 -0.5 -0.5]        row2/row0 = [0.25 0.25 0.25 0.25]</span>
+</div>
+<p>Of course they are &mdash; row i is <span class="inline">e[i]&middot;x&#7488;</span>, so the only thing that changes from row to row is the scalar e[i]. Every row points along x; only the loudness differs.</p>
+<p>A matrix whose rows are all multiples of one vector has exactly <span class="key">one independent direction</span>. That property has a name &mdash; <span class="key">rank 1</span> &mdash; and one way to detect it is that all but one singular value is zero:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  rank(e&middot;x&#7488;) = 1       singular values = [3.2241,  0.0000,  0.0000]</span>
+</div>
+<p>Read that as a statement about the <em>update</em>: one training example can only ever push W along a single direction. It has seen one input; it has no opinion about any other.</p>
+</div>
+
+<div class="card">
+<h3>Step 1d &mdash; a batch: gradients ADD, so the sheets stack</h3>
+<p>Why do examples combine by addition? Because the batch loss is a <em>sum</em> over examples, and differentiation is linear &mdash; the derivative of a sum is the sum of the derivatives. Nothing deeper:</p>
+<div class="math">
+<span class="line">L = L&#8321; + L&#8322; + &hellip;    &rArr;    grad W = e&#8321;&middot;x&#8321;&#7488; + e&#8322;&middot;x&#8322;&#7488; + &hellip;    <span class="cmt"># one rank-1 sheet per example</span></span>
+</div>
+<p>Take two examples &mdash; two <em>similar</em> tokens, since real text is full of those:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  x&#8321;=[1.0, 0.5, -0.3, 0.8]   e&#8321;=[2.0, -1.0, 0.5]</span>
+<span class="line">  x&#8322;=[0.7, 0.9,  0.1, 0.5]   e&#8322;=[1.5, -0.2, 1.0]</span>
+<span class="line"></span>
+<span class="line">  e&#8321;x&#8321;&#7488; = [[ 2.00  1.00 -0.60  1.60]     e&#8322;x&#8322;&#7488; = [[ 1.05  1.35  0.15  0.75]</span>
+<span class="line">           [-1.00 -0.50  0.30 -0.80]              [-0.14 -0.18 -0.02 -0.10]</span>
+<span class="line">           [ 0.50  0.25 -0.15  0.40]]             [ 0.70  0.90  0.10  0.50]]</span>
+<span class="line"></span>
+<span class="line">  G = sum  = [[ 3.05  2.35 -0.45  2.35]</span>
+<span class="line">              [-1.14 -0.68  0.28 -0.90]</span>
+<span class="line">              [ 1.20  1.15 -0.05  0.90]]</span>
+</div>
+<p>Now redo step 1c's row reading on the <em>sum</em>. Each row is no longer a multiple of one vector &mdash; it is a <span class="key">combination of two</span>:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  row 0 of G =   2.0&middot;x&#8321; +  1.5&middot;x&#8322;  = [ 3.05  2.35 -0.45  2.35]</span>
+<span class="line">  row 1 of G =  -1.0&middot;x&#8321; + -0.2&middot;x&#8322;  = [-1.14 -0.68  0.28 -0.90]</span>
+<span class="line">  row 2 of G =   0.5&middot;x&#8321; +  1.0&middot;x&#8322;  = [ 1.20  1.15 -0.05  0.90]</span>
+<span class="line"></span>
+<span class="line">  check row 0 by hand: 2.0&middot;[1.0,0.5,-0.3,0.8] + 1.5&middot;[0.7,0.9,0.1,0.5] = [3.05, 2.35, -0.45, 2.35] ✓</span>
+</div>
+<p>Every row of G lives inside the 2-D plane spanned by x&#8321; and x&#8322; &mdash; a plane sitting inside 4-D input space. So <span class="key">G has rank 2, no matter that it has 12 entries and 4 columns</span>, and the general statement follows: <em>a gradient matrix cannot contain more independent directions than the number of distinct examples that built it.</em> Batch of 32 into a 4096&times;4096 weight? Rank at most 32.</p>
+</div>
+
+<div class="card blue">
+<h3>Step 2 &mdash; measuring the directions, and where the rank shows up</h3>
+<p>"Rank" is a yes/no count &mdash; a direction is either present or absent. What we actually need is <em>how strongly</em> each direction is pushed, and that is exactly what the SVD reports. Any matrix factors as <span class="inline">G = U&middot;S&middot;V&#7488;</span>: V&#7488; picks out input directions, S scales them, U places them in output space. The entries of S are the <span class="key">singular values</span> &mdash; the strength along each principal direction.</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  singular values of G:  [<span class="val">5.1644</span>,  <span class="val">0.3234</span>,  <span class="val">0.0000</span>]        s&#8321;/s&#8322; = <span class="hl">16.0</span></span>
+</div>
+<p>Check it against step 1d before reading on: <span class="key">the third value is 0.0000 &mdash; that zero IS the rank-2 fact</span>. Two examples built G, so at most two directions can be nonzero, and the count of nonzero singular values is precisely the rank. The SVD didn't add information; it graded the directions we already knew were there.</p>
+<p>Now the part that matters: those two nonzero values are <span class="key">16&times; apart</span>. Update W with this G and you shove hard along one axis of the function and barely graze the second. And it isn't arbitrary &mdash; the lopsidedness is <em>caused</em> by the tokens being similar:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run: same e's, different second input</span>
+<span class="line">  cos(x&#8321;, x&#8322;) = 0.865  (30&deg; apart, "similar tokens")  &rarr;  svs [5.164, 0.323]   s&#8321;/s&#8322; = <span class="hl">16.0</span></span>
+<span class="line">  cos(x&#8321;, x')  = 0.156  (nearly perpendicular)          &rarr;  svs [3.853, 0.683]   s&#8321;/s&#8322; =  <span class="val">5.6</span></span>
+</div>
+<p>When two inputs point the same way, their sheets <em>reinforce</em> along the shared direction and only their small difference survives elsewhere &mdash; so one singular value swells and the other shrinks. Real token streams are overwhelmingly of the first kind. <span class="key">Overlapping data is what manufactures a lopsided update.</span></p>
+<details><summary>Refresher: SVD in sixty seconds, on this exact matrix</summary>
+<div class="card"><p>Any matrix does three things in a row: rotate the input (V&#7488;), stretch along perpendicular axes (S), rotate into output space (U). Feed G the input direction v&#8321; (first column of V) and out comes u&#8321; scaled by 5.164; feed it v&#8322; and out comes u&#8322; scaled by 0.323; feed it anything perpendicular to both and out comes ~0. Those are the only things G can do. "Nearly rank-1" means one singular value dwarfs the rest without the others being exactly zero &mdash; and step 3 below drives s&#8321;/s&#8322; from 16 to 69.</p></div></details>
+</div>
+
+<div class="card red">
+<h3>Step 3 &mdash; momentum makes it worse, and you can watch it happen</h3>
+<p>Chapter 2's lesson: consistent directions accumulate in the buffer, fluctuating ones cancel. Across a stream of batches the <em>shared</em> direction is the consistent one, so momentum should concentrate the matrix further onto it. Run it &mdash; buffer <span class="inline">M &larr; 0.95&middot;M + e&middot;x&#7488;</span>, where each step draws <span class="inline">e = e&#8321; + 0.3&middot;&#119977;(0,1)</span> and <span class="inline">x = x&#8321; + 0.3&middot;&#119977;(0,1)</span>, i.e. the same underlying signal with noise on top:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run: numpy default_rng(1), 50 steps</span>
+<span class="line">   t= 1:  svs = [ 2.739,  0.000,  0.000]      s&#8321;/s&#8322; =  &mdash;    <span class="cmt"># one sheet, rank 1</span></span>
+<span class="line">   t= 5:  svs = [11.693,  0.296,  0.073]      s&#8321;/s&#8322; = 39.6</span>
+<span class="line">   t=10:  svs = [23.658,  0.622,  0.090]      s&#8321;/s&#8322; = 38.0</span>
+<span class="line">   t=25:  svs = [42.203,  0.413,  0.088]      s&#8321;/s&#8322; = 102.2</span>
+<span class="line">   t=50:  svs = [<span class="val">56.719</span>,  <span class="val">0.822</span>,  <span class="val">0.138</span>]      s&#8321;/s&#8322; = <span class="hl">69.0</span>,  s&#8321;/s&#8323; = <span class="hl">411</span></span>
+</div>
+<p>Read the columns separately &mdash; that is where the mechanism is visible. <span class="key">s&#8321; grows from 2.7 to 56.7 (&times;21) while s&#8322; stays around 0.5&ndash;0.8 and s&#8323; never leaves the noise floor.</span> The signal direction compounds because it repeats; the others get re-randomized each step and cancel, exactly as chapter 2 described &mdash; only now you can see it happen to a <em>spectrum</em> rather than to a single number.</p>
+<p>This is the observation the Muon write-up reports for real transformers: SGD-momentum and Adam updates for 2-D weights "have very high condition number &mdash; almost low-rank&hellip; dominated by just a few directions." The quiet directions aren't absent &mdash; they are <span class="key">69&times; to 411&times; too quiet to matter</span>. It is the matrix-level version of chapter 3's cold embedding row: the signal is present, the scale is wrong.</p>
+</div>
+<button class="nx" onclick="go(2)">Next: state the wish &mdash; chapter 3, one level up</button>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page" data-t="2. The wish, upgraded">
+<h2>Equalize per direction — the exact analogy to chapter 3</h2>
+
+<div class="card blue">
+<h3>Same wish, new granularity</h3>
+<table>
+<tr><th></th><th>RMSProp/Adam (ch. 3–4)</th><th>Muon (this chapter)</th></tr>
+<tr><td>unit being equalized</td><td>one scalar weight</td><td>one <span class="key">direction</span> of a weight matrix</td></tr>
+<tr><td>measured strength</td><td>√v — its typical gradient size</td><td>σᵢ — its singular value in the update</td></tr>
+<tr><td>the move</td><td>divide each scalar by its √v</td><td>divide each direction by its σᵢ</td></tr>
+<tr><td>result</td><td>every weight steps ≈ lr</td><td>every direction steps ≈ equally</td></tr>
+</table>
+<p>Dividing each direction by its own strength means: replace every nonzero singular value by 1, keeping the directions. Watch what that does to the factorization &mdash; S becomes the identity, and an identity sitting in the middle of a product simply vanishes:</p>
+<div class="math">
+<span class="line">   M = U&middot;S&middot;V&#7488;                       <span class="cmt"># S = diag(56.72, 0.82, 0.14)</span></span>
+<span class="line">   set every nonzero s&#7522; &rarr; 1:</span>
+<span class="line">   O = U&middot;<span class="hl">I</span>&middot;V&#7488;  =  <span class="hl">U&middot;V&#7488;</span>             <span class="cmt"># there is nothing left to multiply by</span></span>
+</div>
+<p>That is the whole content of "orthogonalize": <span class="key">keep both rotations, delete the stretch between them.</span> And the name is earned &mdash; a matrix whose singular values are all 1 has orthonormal rows (or columns, whichever side is shorter), which follows in one line from U and V having orthonormal columns:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run: M is 3&times;4, so it is the rows that are orthonormal</span>
+<span class="line">  (U&middot;V&#7488;)(U&middot;V&#7488;)&#7488; = U <span class="hl">V&#7488;V</span> U&#7488; = U&middot;I&middot;U&#7488; = <span class="hl">I</span>       <span class="cmt"># V&#7488;V = I, then U&#7488;U = I</span></span>
+<span class="line">  singular values of U&middot;V&#7488;:  [1.0, 1.0, 1.0]</span>
+</div>
+<p>U&middot;V&#7488; is also the <em>closest</em> such matrix to M &mdash; closest in the ordinary Frobenius (sum of squared entries) sense. So this is not an invented update: it is M snapped to the nearest matrix whose directions all carry equal weight. The 69&times; whisper and the shout now push with the same force; the whisper was real signal &mdash; it took 50 steps of consistent gradients to build &mdash; it was just drowned.</p>
+</div>
+
+<div class="card orange">
+<h3>Why not just run an SVD every step?</h3>
+<p>Because you'd run one per weight matrix per step, in fp32 (SVD is numerically delicate), on the training critical path. The entire practical content of Muon is a cheaper route: <span class="key">a fixed polynomial, applied five times, that sands every singular value toward 1 without ever computing what the singular values are</span>. That trick is the next page — and it's the reason the method is called <em>M</em>omentum <em>O</em>rthogonalized by <em>N</em>ewton–Schulz.</p>
+<details><summary>Deeper "why": in what sense is UVᵀ the right update? (steepest descent under a different ruler)</summary>
+<p style="padding:8px 4px">SGD's step is "steepest descent if step length is measured entry-wise" (Euclidean). Measure step length by the <em>spectral norm</em> instead — how much the matrix can stretch any single input — and the steepest-descent direction for a linear loss becomes exactly UVᵀ of the gradient. Since what a layer <em>does</em> to activations is bounded by its spectral behavior, that ruler matches the function, not the storage. Same pattern as ever: every optimizer is steepest descent under some norm; the norm is the design choice.</p></details>
+</div>
+<button class="nx" onclick="go(3)">Next: the polynomial that only touches singular values</button>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page" data-t="3. Newton–Schulz">
+<h2>Newton–Schulz: sandpaper that only touches singular values</h2>
+
+<div class="card green">
+<h3>Step 1 — the enabling fact, verified not asserted</h3>
+<p>Take an <em>odd</em> polynomial in matrix form: <span class="inline">p(X) = a&middot;X + b&middot;(XX&#7488;)X + c&middot;(XX&#7488;)&sup2;X</span>. Substitute X = U&middot;S&middot;V&#7488; and push it through one factor at a time. The only fact used is that U and V have orthonormal columns, so <span class="inline">U&#7488;U = I</span> and <span class="inline">V&#7488;V = I</span>:</p>
+<div class="math">
+<span class="line">XX&#7488;     = (USV&#7488;)(USV&#7488;)&#7488; = US<span class="hl">V&#7488;V</span>SU&#7488; = U S&sup2; U&#7488;         <span class="cmt"># V cancels itself</span></span>
+<span class="line">(XX&#7488;)X  = (US&sup2;U&#7488;)(USV&#7488;)  = US&sup2;<span class="hl">U&#7488;U</span>SV&#7488; = U S&sup3; V&#7488;      <span class="cmt"># now U cancels itself</span></span>
+<span class="line">(XX&#7488;)&sup2;X = &hellip; the same trick once more &hellip;  = U S&#8309; V&#7488;</span>
+<span class="line"></span>
+<span class="line">so  p(USV&#7488;) = U&middot;(aS + bS&sup3; + cS&#8309;)&middot;V&#7488; = <span class="hl">U &middot; &phi;(S) &middot; V&#7488;</span>   <span class="cmt"># same U, same V, only S reshaped</span></span>
+</div>
+<p><span class="key">And now you can see why it has to be odd.</span> Each <span class="inline">XX&#7488;</span> contributes an S&sup2; but leaves a trailing U&#7488; behind; only a final X &mdash; which carries the V&#7488; &mdash; sends the result back into the right space. An even term such as <span class="inline">XX&#7488;</span> on its own would give <span class="inline">U S&sup2; U&#7488;</span>, which for our 3&times;4 matrix is 3&times;3: the wrong shape to add to X at all. <em>Odd powers land back where X lives; even ones do not.</em></p>
+<p>Since S is diagonal, <span class="inline">&phi;(S)</span> just means "apply the scalar function <span class="inline">&phi;(s) = 3.4445s &minus; 4.7750s&sup3; + 2.0315s&#8309;</span> to each singular value separately." That is a matrix identity, so test it &mdash; on page 1's own G, Frobenius-normalized:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  singular values of X:           [0.9980,  0.0625,  0.0000]</span>
+<span class="line">  &phi;(s) applied to each number:    [0.7024,  0.2141,  0.0000]</span>
+<span class="line">  singular values of p(X):        [0.7024,  0.2141,  0.0000]     match = <span class="hl">True</span></span>
+</div>
+<p>So the matrix expression &mdash; three matmuls, no decomposition anywhere &mdash; <span class="key">is</span> the scalar function &phi; applied to every singular value at once, blind to what those values are. Note the quiet one: 0.0625 &rarr; 0.2141, an amplification of <span class="key">&times;3.43</span>. That is no coincidence &mdash; near zero &phi;(s) &asymp; 3.4445&middot;s, and 3.4445 is exactly the coefficient a. <em>The polynomial is a steep amplifier precisely where the drowned directions live.</em></p>
+</div>
+
+<div class="card">
+<h3>Step 2 — iterate the scalar curve and watch everything herd toward 1</h3>
+<p>Two things happen before the iteration runs. First <span class="key">Frobenius-normalize</span> &mdash; divide by &radic;(sum of squared entries). That guarantees every singular value lands in (0, 1], and the reason is a one-liner worth keeping: the Frobenius norm squared <em>is</em> the sum of the squared singular values, so no single one can exceed it.</p>
+<div class="math">
+<span class="line">&#8214;X&#8214;&#8322;<sub>F</sub> = &sum;&#7522; s&#7522;&sup2;  &ge;  s&#8321;&sup2;      &rArr;   s&#8321; &le; &#8214;X&#8214;<sub>F</sub>   &rArr;   after dividing by &#8214;X&#8214;<sub>F</sub>, every s&#7522; &le; 1</span>
+<span class="line">check on our X:  &sum;s&#7522;&sup2; = 1.000000  &ge;  s&#8321;&sup2; = 0.996095   &#10003;   (s&#8321; = 0.9980)</span>
+</div>
+<p>That matters because &phi; is only well-behaved on (0, 1] &mdash; feed it a singular value of 56 and the s&#8309; term explodes. Normalization is what makes a <em>fixed</em> polynomial safe for <em>any</em> input matrix. Then apply &phi; five times:</p>
+<div class="math out"><span class="outlabel">output — real run: 5 iterations of φ from different starting values</span>
+<span class="line">  s₀=0.05:  0.050 → 0.172 → 0.567 → 1.202 → 0.944 → <span class="hl">0.758</span></span>
+<span class="line">  s₀=0.20:  0.200 → 0.651 → 1.162 → 0.815 → 0.953 → <span class="hl">0.747</span></span>
+<span class="line">  s₀=0.50:  0.500 → 1.189 → 0.896 → 0.824 → 0.938 → <span class="hl">0.765</span></span>
+<span class="line">  s₀=1.00:  1.000 → 0.701 → 1.114 → 0.721 → 1.090 → <span class="hl">0.696</span></span>
+</div>
+<p>Values 20× apart all end in a band around ~0.7–1.1. Not exactly 1 — the iteration <em>oscillates</em> there rather than converging (φ(1) = 0.701, not 1). That's a deliberate trade: these coefficients were themselves tuned by gradient descent to maximize <span class="key">steepness at 0</span> — rescue the drowned directions fast — at the price of never settling exactly. "All singular values ≈ 1 ± 0.3" turns out to train just as well as exactly 1, and the steep-at-0 property is what 5 iterations buys.</p>
+</div>
+
+<div class="card blue">
+<h3>Step 3 — the real thing: NS5 on the page-1 momentum matrix</h3>
+<div class="math out"><span class="outlabel">output — real run: O = NewtonSchulz₅(M)</span>
+<span class="line">  singular values of M:   [56.72,   0.82,   0.14]     ratios  1 : 0.014 : 0.002</span>
+<span class="line">  singular values of O:   [ 0.99,   0.94,   0.70]     ratios  1 : 0.96  : 0.71</span>
+<span class="line"></span>
+<span class="line">  Uᵀ·O·V  =  [[0.697  −0.000  −0.000]      <span class="cmt"># diagonal in M's OWN singular basis:</span></span>
+<span class="line">              [−0.000   0.944  −0.000]      <span class="cmt"># directions preserved EXACTLY,</span></span>
+<span class="line">              [−0.000   0.000   0.987]]     <span class="cmt"># strengths equalized 500:1 → 1.4:1</span></span>
+</div>
+<p>Read the middle block first, because it is the whole chapter in one printout. Sandwiching O between M's <em>own</em> singular vectors asks a precise question: <em>does O act along the same axes M did?</em> If O had rotated anything, off-diagonal entries would appear. They are all &minus;0.000. <span class="key">So O pushes along exactly M's directions &mdash; nothing rotated, nothing invented</span>; only the numbers on the diagonal changed, from 56.72 / 0.82 / 0.14 to 0.99 / 0.94 / 0.70. The direction that was <span class="key">411&times;</span> too quiet now contributes to the step about as loudly as the dominant one.</p>
+<p><span class="faded" style="color:#888;font-size:.9em">(The diagonal reads 0.697, 0.944, 0.987 while the sorted singular values read 0.99, 0.94, 0.70 &mdash; same three numbers. The diagonal is in M's original strength order, the singular-value list is sorted descending; &phi; is not monotonic on (0,1], so it can reorder them. Harmless here, since the target is "all &asymp; 1" either way.)</span></p>
+<details><summary>The actual code (5 lines of matmuls) and why bf16 is enough</summary>
+<div class="math">
+<span class="line"><span class="kw">def</span> newtonschulz5(G, steps=5, eps=1e-7):</span>
+<span class="line">    a, b, c = (3.4445, -4.7750, 2.0315)</span>
+<span class="line">    X = G.bfloat16();  X /= (X.norm() + eps)      <span class="cmt"># Frobenius-normalize → all σ ≤ 1</span></span>
+<span class="line">    <span class="kw">if</span> G.size(0) &gt; G.size(1): X = X.T             <span class="cmt"># work on the short side (cheaper XXᵀ)</span></span>
+<span class="line">    <span class="kw">for</span> _ <span class="kw">in</span> range(steps):</span>
+<span class="line">        A = X @ X.T</span>
+<span class="line">        X = a*X + (b*A + c*A@A) @ X</span>
+<span class="line">    <span class="kw">return</span> X.T <span class="kw">if</span> G.size(0) &gt; G.size(1) <span class="kw">else</span> X</span>
+</div>
+<p style="padding:8px 4px">Because the target is "everything ≈ 1, roughly," precision barely matters — the iteration is self-correcting within its band, so bf16 works where classical exact-orthogonalization iterations demand fp32. That's what makes it cheap enough for the training loop.</p></details>
+</div>
+<button class="nx" onclick="go(4)">Next: assemble the optimizer</button>
+</div>
+
+<!-- PAGE 4 -->
+<div class="page" data-t="4. The optimizer">
+<h2>Muon assembled — and the fine print that makes it deployable</h2>
+
+<div class="card green">
+<h3>The whole update</h3>
+<div class="math">
+<span class="line">M  ←  μ·M + grad                    <span class="cmt"># ch. 2's buffer, per weight MATRIX (μ ≈ 0.95, Nesterov flavor)</span></span>
+<span class="line">O  ←  NewtonSchulz₅(M)              <span class="cmt"># equalize its directions (previous page)</span></span>
+<span class="line">W  ←  W − lr · O                    <span class="cmt"># step along every direction with equal force</span></span>
+</div>
+<p>Note what's <em>gone</em> relative to Adam: no v, no ε, no bias correction — one buffer per matrix instead of two per scalar, and the normalization is geometric, not statistical. Chapter 3's wish is granted by a different mechanism entirely: not "divide by your typical size" but <span class="key">"flatten the spectrum."</span></p>
+</div>
+
+<div class="card red">
+<h3>Where Muon must NOT be used — and the reason is the chapter's own logic</h3>
+<table>
+<tr><th>parameters</th><th>optimizer</th><th>why</th></tr>
+<tr><td>hidden-layer weight matrices (attention proj., MLPs)</td><td><span class="key">Muon</span></td><td>they're linear maps; directions are the right unit</td></tr>
+<tr><td>embedding table</td><td>AdamW</td><td>its input is a <em>one-hot</em>, not a dense activation — which breaks the assumption Muon is derived from. Next card.</td></tr>
+<tr><td>final head / output layer</td><td>AdamW</td><td>same family of reason (its <em>output</em> is logits, not a dense activation) — but see the honesty note: I'm less sure about this one than the embedding</td></tr>
+<tr><td>gains, biases, norms (1-D)</td><td>AdamW</td><td>no matrix, nothing to orthogonalize</td></tr>
+</table>
+<p>So real "Muon training" is always a hybrid: <span class="key">Muon for the interior, AdamW for the edges</span> — the course's chapters 1–6 don't retire, they get a smaller kingdom.</p>
+</div>
+
+<div class="card orange">
+<h3>"Why not embeddings — is it because they're sparse?" — the answer is no, and the real reason is better</h3>
+<p>Sparsity is the natural guess: in any batch, most rows of a 151,936-row embedding table get <em>exactly zero</em> gradient, so it's tempting to say orthogonalization can't cope. <span class="key">Test it, and that story dies.</span> Feed Newton&ndash;Schulz a matrix with mostly-zero rows:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run: 12 "tokens", only rows 1, 4, 7 active</span>
+<span class="line">  row norms of G      : [0  0.674  0  0  1.736  0  0  1.577  0  0  0  0]</span>
+<span class="line">  row norms of NS5(G) : [0  0.911  0  0  1.000  0  0  0.843  0  0  0  0]</span>
+<span class="line">  zero rows preserved exactly? <span class="hl">True</span></span>
+</div>
+<p>And it's not luck &mdash; it's forced by the algebra. Every term of the iteration ends in X, and <span class="inline">A = XX&#7488;</span> has a zero row wherever X does, so <span class="key">a token that got no gradient gets no update</span>. Sparsity, in the "many empty rows" sense, passes through Muon untouched.</p>
+
+<p><strong>The actual reason is what the update is <em>measured in</em>.</strong> Page 2's foldable said every optimizer is steepest descent under <em>some</em> norm, and the norm is the design choice. Muon is steepest descent under the <span class="key">RMS&rarr;RMS operator norm</span> &mdash; and that derivation assumes the layer maps a <em>dense</em> activation vector to another one. Jeremy Bernstein, deriving Muon, says so directly: a Linear layer assumes "the vectors x and y are 'dense' activation vectors, meaning the entries are close to unit size," and that assumption is what <em>"separates the Linear layer from, say, an Embedding layer that takes one-hot inputs."</em></p>
+<p>An embedding's input is not dense &mdash; it is one-hot. Change the input geometry and the correct norm changes with it: for one-hot in, dense out, the natural choice is the <span class="key">&#8467;&#8321;&rarr;&#8467;&#8322; operator norm</span> (this is what Bernstein's <em>modula</em> library implements for embedding layers). And that norm is a completely different object &mdash; because the maximum of a convex function over the &#8467;&#8321; ball is attained at a <em>vertex</em>, and a vertex of the &#8467;&#8321; ball <em>is</em> a one-hot, i.e. a single token:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run: V=5 tokens, d=3</span>
+<span class="line">  best over 400,000 random interior points : 2.407735</span>
+<span class="line">  best at a VERTEX (a one-hot)             : <span class="hl">2.646872</span>   &lt;- the true &#8467;&#8321;&rarr;&#8467;&#8322; norm</span>
+<span class="line">  = max over tokens of that token's row norm</span>
+</div>
+<p>So the two duality maps ask for different things, and neither implies the other:</p>
+<div class="math">
+<span class="line">hidden linear layer  &rarr;  RMS&rarr;RMS  &rarr;  set every <span class="hl">SINGULAR VALUE</span> to 1   <span class="cmt"># Muon / UV&#7488;</span></span>
+<span class="line">embedding table      &rarr;  &#8467;&#8321;&rarr;&#8467;&#8322;    &rarr;  set every <span class="hl">TOKEN'S ROW NORM</span> to 1</span>
+</div>
+<p>And Muon does not deliver the second. On a Zipfian embedding gradient (V=2,000, d=64) &mdash; after orthogonalization:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  row-norm spread (max/min) after Muon : <span class="hl">96.8&times;</span>      <span class="cmt"># the &#8467;&#8321;&rarr;&#8467;&#8322; target is 1.0x</span></span>
+<span class="line">  col-norm spread (max/min) after Muon :  1.16&times;      <span class="cmt"># it equalized the d DIRECTIONS instead</span></span>
+</div>
+<p>For V &gg; d those are very different requests: Muon equalizes the <em>d column directions</em>, while what an embedding table needs equalized is its <em>V token rows</em>. <span class="key">The mismatch isn't sparsity &mdash; it's that Muon is normalizing the wrong axis for this layer.</span></p>
+<p>Independent corroboration that this axis is real: <em>Muown</em> (Lion et al., May 2026) identifies <span class="key">uncontrolled row-norm growth as the empirical driver of Muon's spectral-norm drift</span> &mdash; a live pathology <em>even in the hidden layers Muon is designed for</em>, which they fix by promoting row magnitudes to an explicit optimizer variable. In an embedding table, rows aren't an internal detail; each one <em>is</em> a token.</p>
+</div>
+
+<div class="card red">
+<h3>Honesty note &mdash; what is established here, and what isn't</h3>
+<table>
+<tr><th>claim</th><th>how solid</th></tr>
+<tr><td>In practice, Muon is not applied to embeddings or the output head; AdamW is.</td><td><span class="key">Established.</span> Stated outright in Jordan's release ("important to optimize input and output parameters using AdamW, <em>even though these are typically 2D</em>"), and followed by Moonlight and Kimi&nbsp;K2.</td></tr>
+<tr><td>Newton&ndash;Schulz preserves zero rows; gradient sparsity is not the problem.</td><td><span class="key">Proved and measured above.</span> Follows from every NS term ending in X.</td></tr>
+<tr><td>&#8467;&#8321;&rarr;&#8467;&#8322; operator norm = the largest token row norm.</td><td><span class="key">Proved and measured above</span> (convex max at a vertex of the &#8467;&#8321; ball).</td></tr>
+<tr><td>The one-hot input is <em>why</em> the RMS&rarr;RMS derivation doesn't cover embeddings.</td><td><span class="key">Well-grounded but not a controlled experiment.</span> It's the modular-duality argument, and Bernstein names the embedding layer as the excluded case &mdash; but his derivation post explicitly leaves embeddings out of scope rather than deriving the alternative and testing it.</td></tr>
+<tr><td>The output head is excluded for the mirror-image reason (logit outputs, not dense).</td><td><span class="key">My reading, weaker.</span> The practice is universal; the mechanism I find less clearly pinned down in the literature than the embedding case. Treat it as a plausible story, not a settled one.</td></tr>
+<tr><td>Amplifying rare tokens' updates is inherently harmful.</td><td><span class="key">Not supported &mdash; and evidence points the other way.</span> "Muon Outperforms Adam in Tail-End Associative Memory Learning" (<a href="https://arxiv.org/abs/2509.26030" style="color:#4fc3f7">arXiv:2509.26030</a>) argues Muon's more <em>isotropic</em> spectrum helps <em>tail</em> classes on heavy-tailed data. Note the scope: that paper studies Value/Output and FFN weights, <span class="key">not</span> embeddings &mdash; so it neither settles nor overturns the exclusion.</td></tr>
+<tr><td>Someone has run a clean ablation isolating why embeddings fail under Muon.</td><td><span class="key">I did not find one.</span> If it exists I haven't seen it. The honest summary is: <em>the exclusion is empirical and universal, the norm argument is the accepted explanation, and the decisive controlled experiment is not something I can point you to.</em></td></tr>
+</table>
+</div>
+
+<div class="card">
+<h3>The bill: under 1% extra FLOPs — check it yourself</h3>
+<p>NS runs on the momentum matrix once per step: for a square m×m weight that's ~T·(4m³)-ish matmul work against a forward+backward that already costs ~6·m²·B for batch of B tokens — the write-up's bound is overhead ≤ T·m/B:</p>
+<div class="math out"><span class="outlabel">output — real run of the formula</span>
+<span class="line">  nanoGPT speedrun   m=768,    B=524,288:      5·768/524288    = <span class="hl">0.73%</span></span>
+<span class="line">  Llama-405B scale   m=16,384, B=16,000,000:   5·16384/16000000 = <span class="hl">0.51%</span></span>
+</div>
+<p>Memory: one buffer per matrix — <em>half</em> of Adam's state. Recall chapter 4's bill (2 floats/param, 56 GB for 7B): Muon's interior costs 1 float/param.</p>
+</div>
+
+<div class="card orange">
+<h3>Scaling patches (Moonshot, "Muon is Scalable for LLM Training"): decay + one derivable constant</h3>
+<p>Two changes took Muon from speedruns to a 5.7-trillion-token production model. First, standard AdamW-style weight decay (at that horizon, unregularized weights drift). Second — and this one you can derive — <span class="key">match the update's RMS to what AdamW produces</span>, so one lr works for both halves of the hybrid. An orthogonalized m×n matrix has min(m,n) singular values ≈ 1, so its entry-RMS is fixed by shape alone:</p>
+<div class="math out"><span class="outlabel">output — real run: RMS of UVᵀ for random matrices</span>
+<span class="line">  1024×1024:  RMS = 0.03125 = 1/√1024      4096×1024:  RMS = 0.01562 = 1/√4096</span>
+<span class="line">   768×3072:  RMS = 0.01804 = 1/√3072      pattern:    RMS(UVᵀ) = <span class="hl">1/√max(m,n)</span>  exactly</span>
+</div>
+<p>AdamW's typical update RMS in practice is around <span class="key">0.2</span> &mdash; note that this one number is an <em>empirical</em> constant from the Moonshot report, not something derived here; everything else in this card is. So multiply Muon's update by <span class="inline">0.2&middot;&radic;max(m,n)</span> and every parameter in the network &mdash; Muon-run or AdamW-run &mdash; moves on the same scale, under one lr and one schedule. A hyperparameter eliminated by geometry.</p>
+</div>
+<button class="nx" onclick="go(5)">Next: receipts, and the course's map completed</button>
+</div>
+
+<!-- PAGE 5 -->
+<div class="page" data-t="5. Receipts & map">
+<h2>The receipts — and what the whole course looks like from here</h2>
+
+<div class="card green">
+<h3>Public numbers, attributed</h3>
+<ul>
+<li><span class="key">NanoGPT speedrun</span> (Keller Jordan, Oct 2024): Muon improved training speed ~35% on the record attempt, and stayed the optimizer of choice through all 12 subsequent records set by 7 different researchers. CIFAR-10 speedrun: 3.3 → 2.6 A100-seconds.</li>
+<li><span class="key">Moonlight</span> (Moonshot AI, Feb 2025): 16B-MoE trained 5.7T tokens on Muon; scaling-law sweeps report ≈ <span class="key">2× compute efficiency vs AdamW</span> at compute-optimal settings.</li>
+<li><span class="key">Kimi K2</span> (2025): a 1-trillion-parameter production model trained with MuonClip — Muon plus a query-key logit clip for attention stability. The first frontier-scale model whose optimizer is not an Adam descendant.</li>
+</ul>
+<p>Honest caveat, same voice as chapter 4's: on small clean problems tuned AdamW still matches it; the wins concentrate where the update-spectrum disease actually bites — large transformer interiors, long horizons.</p>
+</div>
+
+<div class="card blue">
+<h3>The course, complete: what plays the role of √v̂</h3>
+<table>
+<tr><th>era</th><th>optimizer</th><th>the normalizer</th><th>granularity</th></tr>
+<tr><td rowspan="3">per-scalar</td><td>SGD → momentum</td><td>none — raw gradient scale</td><td>—</td></tr>
+<tr><td>AdaGrad → RMSProp → Adam/AdamW</td><td>√(EMA of g²) — a <em>statistical</em> estimate of size</td><td>each weight alone</td></tr>
+<tr><td>LaProp (ch. 6)</td><td>same estimate, applied <em>before</em> averaging</td><td>each weight alone</td></tr>
+<tr><td>per-direction</td><td><span class="key">Muon</span></td><td>the singular value itself — <em>geometry</em>, no estimate</td><td>each direction of a matrix</td></tr>
+<tr><td>per-layer-structure</td><td>Shampoo / SOAP (pointer only)</td><td>full second-moment matrices per layer</td><td>between the two above</td></tr>
+</table>
+<p>Chapter 5's frontier card said new optimizers "change what plays the role of √v̂, not the plot." Now you've seen it happen: the plot — <em>measure how loudly each thing already moves, then equalize</em> — has survived four generations. Only the definition of "thing" changed: a weight, then a weight's history, then a direction.</p>
+</div>
+
+<div class="card purple">
+<h3>Follow-up questions worth being able to answer</h3>
+<table>
+<tr><th>question</th><th>one-line answer</th></tr>
+<tr><td>Why does orthogonalizing help at all?</td><td>Real 2-D updates are near-rank-1 (we measured s₁/s₂ = 69 after momentum); UVᵀ restores the drowned-but-consistent directions to full volume.</td></tr>
+<tr><td>Why Newton–Schulz instead of SVD?</td><td>An odd matrix polynomial provably acts on singular values only; 5 bf16 matmul rounds ≈ UVᵀ at &lt;1% FLOP overhead, no fragile decomposition on the training path.</td></tr>
+<tr><td>Why not on embeddings — is it the sparsity?</td><td><strong>No.</strong> Newton&ndash;Schulz preserves zero rows exactly (every term ends in X). The reason is the norm: Muon is steepest descent under RMS&rarr;RMS, which assumes <em>dense</em> inputs; an embedding takes a <em>one-hot</em>, whose natural &#8467;&#8321;&rarr;&#8467;&#8322; duality map equalizes each token's <em>row norm</em> — a different axis than Muon's singular values (measured: 96.8&times; row spread left over).</td></tr>
+<tr><td>Is that the settled explanation?</td><td>The <em>practice</em> is universal and stated in the release; the norm argument is the accepted reasoning; I could not find a clean published ablation isolating the mechanism, and the output-head case is less clearly pinned down than the embedding case. See the honesty note on tab 4.</td></tr>
+<tr><td>Why is it cheaper in memory than Adam?</td><td>One momentum buffer per matrix; no v, no ε, no bias correction — half of Adam's optimizer state.</td></tr>
+<tr><td>Does the iteration converge to exactly 1?</td><td>No — it oscillates in ~[0.7, 1.1] by design; coefficients trade exact convergence for steepness near 0, which is where the drowned directions live.</td></tr>
+<tr><td>Is Muon "adaptive" in the ch. 3 sense?</td><td>Yes in spirit, no in mechanism: same equalize-the-loud-and-quiet plot, but via spectrum geometry instead of a running statistical estimate.</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h3>Sources</h3>
+<p style="font-size:.88em">Keller Jordan, <a href="https://kellerjordan.github.io/posts/muon/" style="color:#4fc3f7">"Muon: An optimizer for hidden layers in neural networks"</a> (blog, Oct 2024) — algorithm, NS code and coefficients, speedrun numbers, overhead bound, exclusion advice. Moonshot AI, <a href="https://arxiv.org/abs/2502.16982" style="color:#4fc3f7">"Muon is Scalable for LLM Training"</a> (arXiv:2502.16982) — weight decay, RMS matching, Moonlight, 2× claim. LaProp: <a href="https://arxiv.org/abs/2002.04839" style="color:#4fc3f7">arXiv:2002.04839</a>. On the embedding exclusion: Jeremy Bernstein, <a href="https://jeremybernste.in/writing/deriving-muon" style="color:#4fc3f7">"Deriving Muon"</a> (the RMS&rarr;RMS derivation, and the sentence naming the one-hot Embedding layer as the case it does not cover) and the modular-duality line of work behind the <em>modula</em> library; <a href="https://arxiv.org/abs/2605.10797" style="color:#4fc3f7">Muown (arXiv:2605.10797)</a> on row-norm growth as the driver of spectral-norm drift; <a href="https://arxiv.org/abs/2509.26030" style="color:#4fc3f7">arXiv:2509.26030</a> on Muon and tail classes (scope: V/O and FFN weights, not embeddings). Every numeric block labeled "real run" was computed for this chapter (numpy; seeds fixed; scratchpad script <span class="inline">muon.py</span>) — the 3×4 gradient, the momentum spectrum, the φ-vs-matrix match, the NS5 traces, and the RMS(UVᵀ) table are all reproducible by hand from the printed inputs.</p>
+</div>
+<a class="nx" href="../index.html">Back to the course index →</a>
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page'),nav=document.getElementById('nav');
+pages.forEach((p,i)=>{
+  const b=document.createElement('button');
+  b.textContent=p.dataset.t;
+  b.onclick=()=>go(i);
+  if(i===0)b.classList.add('on');
+  nav.appendChild(b);
+});
+function go(n){
+  pages.forEach((p,i)=>p.classList.toggle('on',i===n));
+  nav.querySelectorAll('button').forEach((b,i)=>{
+    b.classList.remove('on');
+    if(i<n)b.classList.add('done');
+    else b.classList.remove('done');
+    if(i===n)b.classList.add('on');
+  });
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flax — reading the code, not just running it</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:880px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+a.nx{display:inline-block;padding:10px 24px;background:#4caf50;color:#000;border-radius:8px;font-weight:700;font-size:.9em;margin-top:14px;text-decoration:none}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 10px;border:1px solid #333;text-align:left;font-size:.84em}
+th{background:#1a1a3a;color:#4fc3f7}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',Consolas,monospace;font-size:.82em;line-height:1.75;overflow-x:auto}
+.math .line{margin:2px 0;display:block;white-space:pre}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.math .kw{color:#c586c0}
+.math .fn{color:#dcdcaa}
+.math.out{border-left:3px solid #4caf50;background:#0d1a12}
+.outlabel{display:block;font-size:.72em;color:#4caf50;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.key{color:#ffb74d;font-weight:600}
+.inline{font-family:'Fira Code',Consolas,monospace;background:#1a1a2e;border:1px solid #333;border-radius:4px;padding:1px 6px;font-size:.86em;color:#9cdcfe}
+.faded{color:#888;font-size:.86em}
+ul{margin-left:20px;margin-top:6px}
+li{margin:4px 0}
+details{margin-top:12px}
+details summary{cursor:pointer;color:#888;font-size:.85em;padding:8px 12px;background:#12122a;border:1px solid #333;border-radius:8px}
+details summary:hover{color:#ccc;border-color:#555}
+details[open] summary{color:#4fc3f7;border-color:#4fc3f7}
+.fw{display:inline-block;font-weight:700;padding:1px 8px;border-radius:4px;font-size:.82em;border:1px solid}
+.fw.np{color:#4fc3f7;border-color:rgba(79,195,247,.4);background:rgba(79,195,247,.08)}
+.fw.tf{color:#ff9800;border-color:rgba(255,152,0,.4);background:rgba(255,152,0,.08)}
+.fw.pt{color:#ef5350;border-color:rgba(239,83,80,.4);background:rgba(239,83,80,.08)}
+.fw.jx{color:#ce93d8;border-color:rgba(206,147,216,.4);background:rgba(206,147,216,.08)}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+
+<h1>Flax &mdash; reading the code, not just running it</h1>
+<p class="sub">Chapter 11. In PyTorch the weights live inside the module object. In Flax they do not, and every strange thing about Flax code follows from that one fact. This chapter is about being able to open an unfamiliar Flax file and say what every line does.</p>
+
+<div class="nav" id="nav"></div>
+
+<!-- PAGE 0 -->
+<div class="page on" data-t="0. Where are the weights?">
+<h2>The one strange thing, as a printed artifact</h2>
+
+<div class="card">
+<h3>Start familiar &mdash; <span class="fw pt">pt</span> a linear layer in PyTorch</h3>
+<div class="math">
+<span class="line"><span class="kw">import</span> torch</span>
+<span class="line">lin = torch.nn.Linear(<span class="val">2</span>, <span class="val">3</span>)</span>
+<span class="line"><span class="fn">print</span>(lin)</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"lin.weight.shape :"</span>, <span class="fn">tuple</span>(lin.weight.shape))</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"lin.bias.shape   :"</span>, <span class="fn">tuple</span>(lin.bias.shape))</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"state_dict keys  :"</span>, <span class="fn">list</span>(lin.state_dict().keys()))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run, torch 2.8.0</span>
+<span class="line">Linear(in_features=2, out_features=3, bias=True)</span>
+<span class="line">lin.weight.shape : (3, 2)</span>
+<span class="line">lin.bias.shape   : (3,)</span>
+<span class="line">state_dict keys  : ['weight', 'bias']</span>
+</div>
+<p>Nothing surprising. The object <em>is</em> the model: it carries its own numbers, you can reach in and read them, and <span class="inline">state_dict()</span> is a view onto the numbers the object already holds.</p>
+</div>
+
+<div class="card purple">
+<h3>The same layer in <span class="fw jx">jx</span> Flax &mdash; and the line that fails</h3>
+<div class="math">
+<span class="line"><span class="kw">import</span> jax, jax.numpy <span class="kw">as</span> jnp</span>
+<span class="line"><span class="kw">from</span> flax <span class="kw">import</span> linen <span class="kw">as</span> nn</span>
+<span class="line"></span>
+<span class="line">model = nn.Dense(features=<span class="val">3</span>)</span>
+<span class="line"><span class="fn">print</span>(model)</span>
+<span class="line"><span class="kw">try</span>:</span>
+<span class="line">    model.kernel</span>
+<span class="line"><span class="kw">except</span> <span class="fn">Exception</span> <span class="kw">as</span> e:</span>
+<span class="line">    <span class="fn">print</span>(<span class="val">f"{type(e).__name__}: {e}"</span>)</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run, flax 0.12.9 (trimmed: the repr lists 10 attributes, 5 shown)</span>
+<span class="line">Dense(</span>
+<span class="line">    # attributes</span>
+<span class="line">    features = 3</span>
+<span class="line">    use_bias = True</span>
+<span class="line">    dtype = None</span>
+<span class="line">    param_dtype = float32</span>
+<span class="line">    kernel_init = init</span>
+<span class="line">)</span>
+<span class="line">AttributeError: "Dense" object has no attribute "kernel". If "kernel" is defined</span>
+<span class="line">in '.setup()', remember these fields are only accessible from inside 'init' or 'apply'.</span>
+</div>
+<p>Read the repr first. Every line in it is a <span class="key">setting</span>: how many outputs, which dtype, which initializer function. There is not a single number that could be trained. Read the error second, because it is unusually helpful: it does not say "no such thing as kernel", it says the kernel is only reachable <em>inside</em> two specific functions.</p>
+</div>
+
+<div class="card green">
+<h3>So where are they? You have to ask for them</h3>
+<div class="math">
+<span class="line">x = jnp.ones((<span class="val">1</span>, <span class="val">2</span>))                      <span class="cmt"># one example, 2 features</span></span>
+<span class="line">params = model.init(jax.random.key(<span class="val">0</span>), x)   <span class="cmt"># &lt;- this is where numbers get made</span></span>
+<span class="line"><span class="fn">print</span>(<span class="fn">type</span>(params).__name__)</span>
+<span class="line"><span class="fn">print</span>(jax.tree.map(jnp.shape, params))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">dict</span>
+<span class="line">{'params': {'bias': (3,), 'kernel': (2, 3)}}</span>
+</div>
+<p>Line by line. <span class="inline">jax.tree.map</span> walks a nested structure and applies a function to every array at the leaves, so mapping <span class="inline">jnp.shape</span> over the result prints the <em>skeleton</em> instead of pages of floats. The type is a plain <span class="key">dict</span>. Inside it, one entry called <span class="inline">params</span>, and inside that, the two arrays.</p>
+<p>Two details worth pinning now. The kernel is <span class="inline">(2, 3)</span>, which is (inputs, outputs) &mdash; the transpose of torch's <span class="inline">(3, 2)</span>, so a naive weight copy between the two frameworks is silently wrong. And <span class="inline">init</span> needed <span class="inline">x</span>: the layer was told it has 3 outputs but never told it has 2 inputs, so it has to see a real input to know the shape to create. Page 1 shows exactly how it finds out.</p>
+</div>
+
+<div class="card blue">
+<h3>The whole chapter in one sentence</h3>
+<p>You now have <span class="key">two objects where PyTorch has one</span>:</p>
+<ul>
+<li><strong>the module</strong> &mdash; a recipe. Settings and code, zero numbers. Cheap, reusable, and it never changes during training.</li>
+<li><strong>the params dict</strong> &mdash; numbers. No code, no idea what it is for. This is the thing that gets differentiated, updated, sharded and checkpointed.</li>
+</ul>
+<p>And one function that puts them together for exactly one call: <span class="inline">model.apply(params, x)</span>. Chapter 6 said it in one line, which now has something concrete under it: a neural network library in JAX is a convenient factory and namer for that pytree.</p>
+</div>
+
+<div class="card">
+<h3>The plan, so nothing arrives unannounced</h3>
+<ul>
+<li>Page 1: the one trick &mdash; <span class="inline">self.param</span> does two different jobs depending on who called it. Everything else is a consequence.</li>
+<li>Page 2: reading a real module &mdash; where <span class="inline">Dense_0</span> comes from, and the naming rule that silently breaks checkpoints.</li>
+<li>Page 3: why <span class="inline">apply</span> in real code has all those extra arguments (<span class="inline">rngs</span>, <span class="inline">mutable</span>, <span class="inline">train</span>).</li>
+<li>Page 4: a full training step, reproducing chapter 9's XOR losses to six decimals.</li>
+<li>Page 5: NNX &mdash; the same model with the plumbing hidden, and how to read both dialects.</li>
+<li>Page 6: map, traps, and the questions that come up.</li>
+</ul>
+</div>
+<button class="nx" onclick="go(1)">Next: the one trick</button>
+</div>
+
+<!-- PAGE 1 -->
+<div class="page" data-t="1. The one trick">
+<h2><span class="inline">self.param</span> is one line that does two different things</h2>
+
+<div class="card">
+<h3>Step 1 &mdash; the smallest possible module</h3>
+<p>Course canonical numbers: <span class="inline">w = 2</span>, <span class="inline">x = 3</span>, target <span class="inline">t = 10</span>. One weight, one multiply, no layers, no bias.</p>
+<div class="math">
+<span class="line"><span class="kw">def</span> <span class="fn">make_w</span>(key):</span>
+<span class="line">    <span class="fn">print</span>(<span class="val">"   [init_fn] creating w = 2.0"</span>)</span>
+<span class="line">    <span class="kw">return</span> jnp.array(<span class="val">2.0</span>)</span>
+<span class="line"></span>
+<span class="line"><span class="kw">class</span> <span class="fn">Times</span>(nn.Module):</span>
+<span class="line">    <span class="lbl">@nn.compact</span></span>
+<span class="line">    <span class="kw">def</span> <span class="fn">__call__</span>(self, x):</span>
+<span class="line">        <span class="fn">print</span>(<span class="val">"   [body] entered"</span>)</span>
+<span class="line">        w = <span class="hl">self.param('w', make_w)</span></span>
+<span class="line">        <span class="fn">print</span>(<span class="val">f"   [body] self.param('w') returned {w}"</span>)</span>
+<span class="line">        <span class="kw">return</span> w * x</span>
+</div>
+<p>Three things to name before we run it. <span class="inline">nn.Module</span> is the base class every Flax model inherits. <span class="inline">@nn.compact</span> is a decorator that permits this method to declare parameters inline; without it, declaring a parameter here is an error. <span class="inline">self.param(name, init_fn)</span> is the declaration itself: it takes a string name and a function that <em>would</em> build the array, and it calls that function with a random key.</p>
+<p>The two <span class="inline">print</span> calls are ours. They are flashlights: Flax says nothing on its own, so anything printed below comes from our code.</p>
+</div>
+
+<div class="card purple">
+<h3>Step 2 &mdash; run both entry points, with the prints numbered</h3>
+<div class="math">
+<span class="line">m = Times()</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"(1) calling init"</span>)</span>
+<span class="line">p = m.init(jax.random.key(<span class="val">0</span>), <span class="val">3.0</span>)</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"(2) init returned:"</span>, p)</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"(3) calling apply"</span>)</span>
+<span class="line">out = m.apply(p, <span class="val">3.0</span>)</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"(4) apply returned:"</span>, out)</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">(1) calling init</span>
+<span class="line">   [body] entered</span>
+<span class="line">   [init_fn] creating w = 2.0</span>
+<span class="line">   [body] self.param('w') returned 2.0</span>
+<span class="line">(2) init returned: {'params': {'w': Array(2., dtype=float32, weak_type=True)}}</span>
+<span class="line">(3) calling apply</span>
+<span class="line">   [body] entered</span>
+<span class="line">   [init_fn] creating w = 2.0</span>
+<span class="line">   [body] self.param('w') returned 2.0</span>
+<span class="line">(4) apply returned: 6.0</span>
+</div>
+<table>
+<tr><th style="width:26%">line</th><th>what it tells you</th></tr>
+<tr><td><span class="inline">[body] entered</span>, after (1)</td><td><span class="inline">init</span> <strong>runs your <span class="inline">__call__</span> for real</strong>. It is not reading the class or inspecting types. This is why it needs an input: shapes are discovered by actually running the forward pass.</td></tr>
+<tr><td><span class="inline">[init_fn] creating</span>, after (1)</td><td>In init mode, <span class="inline">self.param</span> calls your function, keeps the array, and files it under the name <span class="inline">'w'</span>.</td></tr>
+<tr><td>(2) the returned dict</td><td>The <em>only</em> thing init gives back. Not a model, not a copy of the module. A dict of numbers.</td></tr>
+<tr><td><span class="inline">[body] entered</span>, after (3)</td><td><span class="inline">apply</span> runs the same body again. Same code path, both times.</td></tr>
+<tr><td><span class="inline">[init_fn] creating</span>, after (3)</td><td><span class="key">The surprise.</span> The initializer ran during apply too, even though a value already exists. Step 3 is why.</td></tr>
+<tr><td>(4) <span class="inline">6.0</span></td><td>2 &times; 3. The canonical forward from chapters 3, 4 and 8.</td></tr>
+</table>
+</div>
+
+<div class="card orange">
+<h3>Step 3 &mdash; why the initializer runs during apply, when its answer is not used</h3>
+<p>If the created value were being used, apply would ignore the dict entirely, and passing different numbers would change nothing. Test that directly:</p>
+<div class="math">
+<span class="line">p2 = {<span class="val">'params'</span>: {<span class="val">'w'</span>: jnp.array(<span class="val">5.0</span>)}}      <span class="cmt"># a dict we typed by hand</span></span>
+<span class="line"><span class="fn">print</span>(<span class="val">"apply with w=5.0 ->"</span>, m.apply(p2, <span class="val">3.0</span>))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">   [body] entered</span>
+<span class="line">   [init_fn] creating w = 2.0</span>
+<span class="line">   [body] self.param('w') returned <span class="hl">5.0</span></span>
+<span class="line">apply with w=5.0 -> 15.0</span>
+</div>
+<p>There it is, in two adjacent lines. The initializer produced 2.0 and <span class="inline">self.param</span> returned 5.0. The created value was <strong>computed and thrown away</strong>; the returned value came out of the dict. So what was the throwaway for? Give apply a wrong shape and Flax says so itself:</p>
+<div class="math">
+<span class="line"><span class="kw">class</span> <span class="fn">Times</span>(nn.Module):           <span class="cmt"># same module, initializer now makes shape (3,)</span></span>
+<span class="line">    <span class="lbl">@nn.compact</span></span>
+<span class="line">    <span class="kw">def</span> <span class="fn">__call__</span>(self, x):</span>
+<span class="line">        w = self.param(<span class="val">'w'</span>, <span class="kw">lambda</span> key: jnp.zeros((<span class="val">3</span>,)))</span>
+<span class="line">        <span class="kw">return</span> w * x</span>
+<span class="line"></span>
+<span class="line">t.apply({<span class="val">'params'</span>: {<span class="val">'w'</span>: jnp.ones((<span class="val">5</span>,))}}, <span class="val">2.0</span>)      <span class="cmt"># wrong shape on purpose</span></span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run (URL trimmed)</span>
+<span class="line">ScopeParamShapeError: For parameter "w" in "/", the given initializer is expected</span>
+<span class="line">to generate shape (3,), but the existing parameter it received has shape (5,).</span>
+</div>
+<p>The initializer is run as a <span class="key">shape oracle</span>. Flax asks it "what should this have looked like?", compares against what you handed in, and complains on a mismatch. Read the message closely and it describes exactly the two-mode behaviour: <em>generated</em> shape versus <em>received</em> shape.</p>
+</div>
+
+<div class="card green">
+<h3>Step 4 &mdash; the rule, and everything that follows from it</h3>
+<div class="math">
+<span class="line"><span class="kw">self.param(name, init_fn)  in INIT mode:</span>   run init_fn, KEEP the array, file it under name</span>
+<span class="line"><span class="kw">self.param(name, init_fn)  in APPLY mode:</span>  run init_fn for its SHAPE only, then</span>
+<span class="line">                                        return the array stored under name</span>
+</div>
+<p>Consequences, each of which is a thing that confuses people reading Flax for the first time:</p>
+<ul>
+<li><strong>Why init takes an input.</strong> The body runs for real, so shapes come from a real forward pass. That input is usually fake data of the right shape, and its values are irrelevant.</li>
+<li><strong>Why the module has no <span class="inline">.kernel</span>.</strong> Outside init and apply, no dict is bound, so there is nothing to return.</li>
+<li><strong>Why params come back nested.</strong> Names are filed as the body runs. A submodule's body runs inside yours, so its names nest inside yours.</li>
+<li><strong>Why you can hand-write a params dict.</strong> It is a plain dict keyed by the names you chose. Page 4 builds one by hand from NumPy arrays.</li>
+</ul>
+<svg viewBox="0 0 760 334" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:760px;display:block;margin:10px auto">
+<defs>
+<marker id="arrG" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#888"/></marker>
+<marker id="arrP" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#888"/></marker>
+</defs>
+<line x1="380" y1="14" x2="380" y2="304" stroke="#2a2a4a" stroke-dasharray="4 5"/>
+<text x="195.0" y="22" fill="#4caf50" font-size="12" text-anchor="middle" style="font-family:'Segoe UI',system-ui,sans-serif" font-weight="700" xml:space="preserve">INIT MODE  —  m.init(key, 3.0)</text><rect x="30" y="34" width="330" height="34" rx="8" fill="#1a1a2e" stroke="#4caf50" stroke-width="1.5"/><text x="195.0" y="55" fill="#e0e0e0" font-size="11" text-anchor="middle" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">in: key + example x  (no dict yet)</text><path d="M 195.0 68 L 195.0 90" stroke="#888" stroke-width="1.5" marker-end="url(#arrG)"/><rect x="30" y="90" width="330" height="62" rx="8" fill="#1a1a2e" stroke="#444" stroke-width="1.5"/><text x="44" y="110" fill="#888" font-size="10" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">your __call__ body runs</text><text x="44" y="128" fill="#9cdcfe" font-size="11" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">w = self.param('w', make_w)</text><text x="44" y="145" fill="#9cdcfe" font-size="11" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">return w * x</text><path d="M 195.0 152 L 195.0 176" stroke="#4caf50" stroke-width="1.5" marker-end="url(#arrG)"/><rect x="30" y="176" width="330" height="52" rx="8" fill="#1a1a2e" stroke="#4caf50" stroke-width="1.5"/><text x="44" y="196" fill="#e0e0e0" font-size="11" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">make_w() runs, returns 2.0</text><text x="44" y="214" fill="#4caf50" font-size="11" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">KEEP it, file under 'w'</text><path d="M 195.0 228 L 195.0 250" stroke="#888" stroke-width="1.5" marker-end="url(#arrG)"/><rect x="30" y="250" width="330" height="32" rx="8" fill="#1a1a2e" stroke="#4caf50" stroke-width="1.5"/><text x="195.0" y="271" fill="#4caf50" font-size="11" text-anchor="middle" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">{'params': {'w': 2.0}}</text><text x="565.0" y="22" fill="#ce93d8" font-size="12" text-anchor="middle" style="font-family:'Segoe UI',system-ui,sans-serif" font-weight="700" xml:space="preserve">APPLY MODE  —  m.apply(p, 3.0)</text><rect x="400" y="34" width="330" height="34" rx="8" fill="#1a1a2e" stroke="#ce93d8" stroke-width="1.5"/><text x="565.0" y="55" fill="#e0e0e0" font-size="11" text-anchor="middle" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">p = {'params': {'w': 2.0}}</text><path d="M 565.0 68 L 565.0 90" stroke="#888" stroke-width="1.5" marker-end="url(#arrP)"/><rect x="400" y="90" width="330" height="62" rx="8" fill="#1a1a2e" stroke="#444" stroke-width="1.5"/><text x="414" y="110" fill="#888" font-size="10" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">your __call__ body runs</text><text x="414" y="128" fill="#9cdcfe" font-size="11" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">w = self.param('w', make_w)</text><text x="414" y="145" fill="#9cdcfe" font-size="11" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">return w * x</text><path d="M 565.0 152 L 565.0 176" stroke="#ce93d8" stroke-width="1.5" marker-end="url(#arrP)"/><rect x="400" y="176" width="330" height="70" rx="8" fill="#1a1a2e" stroke="#ce93d8" stroke-width="1.5"/><text x="414" y="196" fill="#e0e0e0" font-size="11" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">make_w() runs, returns 2.0</text><text x="414" y="214" fill="#ef5350" font-size="11" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">DISCARD it, keep the shape</text><text x="414" y="232" fill="#4caf50" font-size="11" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">look up 'w' in the dict</text><path d="M 565.0 246 L 565.0 268" stroke="#888" stroke-width="1.5" marker-end="url(#arrP)"/><rect x="400" y="268" width="330" height="32" rx="8" fill="#1a1a2e" stroke="#ce93d8" stroke-width="1.5"/><text x="565.0" y="289" fill="#ce93d8" font-size="11" text-anchor="middle" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">6.0</text>
+<text x="380" y="324" fill="#888" font-size="11" text-anchor="middle" style="font-family:'Segoe UI',system-ui,sans-serif" font-weight="normal" xml:space="preserve">same class, same body, same line of code — only the direction of the arrow at self.param differs</text>
+</svg>
+<p>The diagram is the same body drawn twice. The only difference between the lanes is which way the arrow at <span class="inline">self.param</span> points: outward into a new dict, or inward from the dict you supplied.</p>
+</div>
+
+<div class="card blue">
+<h3>Step 5 &mdash; the gradient, and why this design exists at all</h3>
+<p>Chapter 4's rule was that JAX differentiates a <em>function</em> with respect to its <em>argument</em>. Flax's split exists to make the parameters be that argument:</p>
+<div class="math">
+<span class="line"><span class="kw">def</span> <span class="fn">loss_fn</span>(params):</span>
+<span class="line">    pred = m.apply(params, <span class="val">3.0</span>)</span>
+<span class="line">    <span class="kw">return</span> (pred - <span class="val">10.0</span>) ** <span class="val">2</span></span>
+<span class="line"></span>
+<span class="line"><span class="fn">print</span>(<span class="val">"loss :"</span>, loss_fn(p))</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"grad :"</span>, jax.grad(loss_fn)(p))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run (flashlight prints from the body omitted here)</span>
+<span class="line">loss : 16.0</span>
+<span class="line">grad : {'params': {'w': Array(-24., dtype=float32, weak_type=True)}}</span>
+</div>
+<p>Loss 16, gradient &minus;24 &mdash; the same two numbers as the PyTorch autograd course, chapter 4's <span class="inline">jax.grad</span> demo, and the from-scratch engine in chapter 8. And notice the shape of the gradient: <span class="key">a dict with the same structure as the params</span>. That is what makes the update rule a single tree operation, which page 4 uses.</p>
+<details><summary>Refresher: what is a pytree again, and why does grad return a dict?</summary>
+<div class="card">
+<p>A pytree is any nesting of lists, tuples and dicts whose leaves are arrays. JAX's transformations do not care about the container, only the leaves. <span class="inline">jax.grad</span> returns a gradient with <em>the same container shape as its input</em>, so differentiating with respect to a dict of 200 arrays gives a dict of 200 gradients laid out identically. Chapter 10 page 1 is the full treatment.</p>
+</div>
+</details>
+</div>
+<button class="nx" onclick="go(2)">Next: reading a real module</button>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page" data-t="2. Reading a real module">
+<h2>Where <span class="inline">Dense_0</span> comes from, and the rule that breaks checkpoints</h2>
+
+<div class="card">
+<h3>Step 1 &mdash; the class body has two kinds of names, and they behave oppositely</h3>
+<div class="math">
+<span class="line"><span class="kw">class</span> <span class="fn">Two</span>(nn.Module):</span>
+<span class="line">    hidden: <span class="fn">int</span>                      <span class="cmt"># a FIELD  — a hyperparameter</span></span>
+<span class="line">    scale: <span class="fn">float</span> = <span class="val">2.0</span>               <span class="cmt"># a FIELD with a default</span></span>
+<span class="line">    <span class="lbl">@nn.compact</span></span>
+<span class="line">    <span class="kw">def</span> <span class="fn">__call__</span>(self, x):</span>
+<span class="line">        w = self.param(<span class="val">'w'</span>, nn.initializers.ones, (self.hidden,))   <span class="cmt"># a PARAMETER</span></span>
+<span class="line">        <span class="kw">return</span> self.scale * w * x</span>
+<span class="line"></span>
+<span class="line">m = Two(hidden=<span class="val">3</span>)</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"m.hidden (a field, readable now) :"</span>, m.hidden)</span>
+<span class="line"><span class="kw">try</span>: m.w</span>
+<span class="line"><span class="kw">except</span> <span class="fn">Exception</span> <span class="kw">as</span> e: <span class="fn">print</span>(<span class="val">"m.w ->"</span>, <span class="fn">type</span>(e).__name__)</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"params:"</span>, jax.tree.map(jnp.shape, m.init(jax.random.key(<span class="val">0</span>), <span class="val">1.0</span>)))</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"apply :"</span>, m.apply(m.init(jax.random.key(<span class="val">0</span>), <span class="val">1.0</span>), <span class="val">1.0</span>))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">m.hidden (a field, readable now) : 3</span>
+<span class="line">m.w -> AttributeError</span>
+<span class="line">params: {'params': {'w': (3,)}}</span>
+<span class="line">apply : [2. 2. 2.]</span>
+</div>
+<p>A Flax module is a Python dataclass, so those bare annotations at the top of the class are constructor arguments. They are <span class="key">settings, available immediately, and never trained</span>. Anything created by <span class="inline">self.param</span> is the opposite: unavailable on the object, and trained. When you open a Flax file, sorting the class body into these two piles is the first pass.</p>
+<p>The third argument to <span class="inline">self.param</span> is passed straight through to the initializer, which is how <span class="inline">(self.hidden,)</span> becomes the shape. Output <span class="inline">[2. 2. 2.]</span> is scale 2.0 times ones times x = 1.0.</p>
+</div>
+
+<div class="card purple">
+<h3>Step 2 &mdash; a two-layer network, and the tree it produces</h3>
+<div class="math">
+<span class="line"><span class="kw">class</span> <span class="fn">MLP</span>(nn.Module):</span>
+<span class="line">    hidden: <span class="fn">int</span></span>
+<span class="line">    <span class="lbl">@nn.compact</span></span>
+<span class="line">    <span class="kw">def</span> <span class="fn">__call__</span>(self, x):</span>
+<span class="line">        x = nn.tanh(nn.Dense(self.hidden)(x))</span>
+<span class="line">        <span class="kw">return</span> nn.sigmoid(nn.Dense(<span class="val">1</span>)(x))</span>
+<span class="line"></span>
+<span class="line">X = jnp.zeros((<span class="val">4</span>, <span class="val">2</span>))                      <span class="cmt"># fake batch: 4 examples, 2 features</span></span>
+<span class="line">v = MLP(hidden=<span class="val">8</span>).init(jax.random.key(<span class="val">0</span>), X)</span>
+<span class="line"><span class="fn">print</span>(jax.tree.map(jnp.shape, v))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">{'params': {'Dense_0': {'bias': (8,), 'kernel': (2, 8)},</span>
+<span class="line">            'Dense_1': {'bias': (1,), 'kernel': (8, 1)}}}</span>
+</div>
+<p>Note the double call syntax <span class="inline">nn.Dense(8)(x)</span>. The first pair of parentheses <em>constructs</em> a layer object with its settings; the second <em>calls</em> it on data. In torch those two steps live in different methods, <span class="inline">__init__</span> and <span class="inline">forward</span>. Under <span class="inline">@nn.compact</span> they are allowed on one line, which is why Flax models look so compressed.</p>
+<svg viewBox="0 0 760 244" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:760px;display:block;margin:10px auto">
+<defs>
+<marker id="arrB" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#4fc3f7"/></marker>
+<marker id="arrO" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#ffb74d"/></marker>
+</defs>
+<text x="180" y="22" fill="#fff" font-size="12" text-anchor="middle" style="font-family:'Segoe UI',system-ui,sans-serif" font-weight="700" xml:space="preserve">what you wrote</text><text x="575" y="22" fill="#fff" font-size="12" text-anchor="middle" style="font-family:'Segoe UI',system-ui,sans-serif" font-weight="700" xml:space="preserve">what init() handed back</text><rect x="30" y="34" width="300" height="132" rx="8" fill="#1a1a2e" stroke="#444" stroke-width="1.5"/><text x="44" y="56" fill="#c586c0" font-size="10.5" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">class MLP(nn.Module):</text><text x="44" y="75" fill="#888" font-size="10.5" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">    hidden: int</text><text x="44" y="94" fill="#9cdcfe" font-size="10.5" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">    @nn.compact</text><text x="44" y="113" fill="#c586c0" font-size="10.5" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">    def __call__(self, x):</text><text x="44" y="132" fill="#4fc3f7" font-size="10.5" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">        x = tanh(nn.Dense(8)(x))</text><text x="44" y="151" fill="#ffb74d" font-size="10.5" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">        return sig(nn.Dense(1)(x))</text><rect x="420" y="34" width="310" height="132" rx="8" fill="#1a1a2e" stroke="#444" stroke-width="1.5"/><text x="434" y="56" fill="#e0e0e0" font-size="10.5" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">{'params': {</text><text x="434" y="88" fill="#4fc3f7" font-size="10.5" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">  'Dense_0': {kernel (2,8),</text><text x="434" y="105" fill="#4fc3f7" font-size="10.5" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">               bias (8,)},</text><text x="434" y="133" fill="#ffb74d" font-size="10.5" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">  'Dense_1': {kernel (8,1),</text><text x="434" y="150" fill="#ffb74d" font-size="10.5" text-anchor="start" style="font-family:'Fira Code',Consolas,monospace" font-weight="normal" xml:space="preserve">               bias (1,)}}}</text><path d="M 334 128 C 380 128 380 84 416 84" stroke="#4fc3f7" stroke-width="1.5" fill="none" marker-end="url(#arrB)"/><path d="M 334 147 C 380 147 380 129 416 129" stroke="#ffb74d" stroke-width="1.5" fill="none" marker-end="url(#arrO)"/><rect x="30" y="186" width="700" height="44" rx="8" fill="#1a0a2a" stroke="#ce93d8" stroke-width="1.5"/><text x="380" y="205" fill="#ce93d8" font-size="11.5" text-anchor="middle" style="font-family:'Segoe UI',system-ui,sans-serif" font-weight="normal" xml:space="preserve">The index is assigned when the layer object is CONSTRUCTED, not when it is called.</text><text x="380" y="222" fill="#ce93d8" font-size="11.5" text-anchor="middle" style="font-family:'Segoe UI',system-ui,sans-serif" font-weight="normal" xml:space="preserve">Move the nn.Dense(1) line above the nn.Dense(8) line and these two names swap.</text>
+</svg>
+</div>
+
+<div class="card red">
+<h3>Step 3 &mdash; the naming rule, and the trap in it</h3>
+<p>Nobody wrote the string <span class="inline">Dense_0</span>. Flax generated it. The obvious guess is that it numbers layers in the order they are called. It does not: it numbers them <span class="key">in the order they are constructed</span>. Two modules with identical maths, differing only in where the object is created:</p>
+<div class="math">
+<span class="line"><span class="kw">class</span> <span class="fn">InOrder</span>(nn.Module):</span>
+<span class="line">    <span class="lbl">@nn.compact</span></span>
+<span class="line">    <span class="kw">def</span> <span class="fn">__call__</span>(self, x):</span>
+<span class="line">        x = nn.Dense(<span class="val">8</span>)(x)          <span class="cmt"># constructed 1st, called 1st</span></span>
+<span class="line">        <span class="kw">return</span> nn.Dense(<span class="val">1</span>)(x)       <span class="cmt"># constructed 2nd, called 2nd</span></span>
+<span class="line"></span>
+<span class="line"><span class="kw">class</span> <span class="fn">HeadFirst</span>(nn.Module):</span>
+<span class="line">    <span class="lbl">@nn.compact</span></span>
+<span class="line">    <span class="kw">def</span> <span class="fn">__call__</span>(self, x):</span>
+<span class="line">        head = nn.Dense(<span class="val">1</span>)          <span class="cmt"># constructed 1st, called 2nd</span></span>
+<span class="line">        x = nn.Dense(<span class="val">8</span>)(x)          <span class="cmt"># constructed 2nd, called 1st</span></span>
+<span class="line">        <span class="kw">return</span> head(x)</span>
+<span class="line"></span>
+<span class="line"><span class="kw">for</span> cls <span class="kw">in</span> (InOrder, HeadFirst):</span>
+<span class="line">    tree = jax.tree.map(jnp.shape, cls().init(jax.random.key(<span class="val">0</span>), X)[<span class="val">'params'</span>])</span>
+<span class="line">    <span class="fn">print</span>(<span class="val">f"{cls.__name__:10s}"</span>, {k: v[<span class="val">'kernel'</span>] <span class="kw">for</span> k, v <span class="kw">in</span> tree.items()})</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">InOrder    {'Dense_0': (2, 8), 'Dense_1': (8, 1)}</span>
+<span class="line">HeadFirst  {'Dense_0': <span class="hl">(8, 1)</span>, 'Dense_1': <span class="hl">(2, 8)</span>}</span>
+</div>
+<p>Read the shapes, not the names. In <span class="inline">InOrder</span>, <span class="inline">Dense_0</span> is the 2&rarr;8 hidden layer. In <span class="inline">HeadFirst</span> the identical network has <span class="inline">Dense_0</span> as the 8&rarr;1 output layer, because that object was constructed one line earlier. <span class="key">A refactor that only moves a construction line renames your checkpoint keys.</span> Loading an old checkpoint then either errors on shape or, if the shapes happen to match, silently loads the wrong weights.</p>
+<p>Which is why production code names layers explicitly:</p>
+<div class="math">
+<span class="line">x = nn.tanh(nn.Dense(self.hidden, <span class="hl">name='fc1'</span>)(x))</span>
+<span class="line"><span class="kw">return</span> nn.sigmoid(nn.Dense(<span class="val">1</span>, <span class="hl">name='out'</span>)(x))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">{'params': {'fc1': {'bias': (8,), 'kernel': (2, 8)},</span>
+<span class="line">            'out': {'bias': (1,), 'kernel': (8, 1)}}}</span>
+</div>
+<p>When you see <span class="inline">name=</span> everywhere in a Google model file, that is what it is defending against.</p>
+</div>
+
+<div class="card">
+<h3>Step 4 &mdash; the other dialect: <span class="inline">setup</span> instead of <span class="inline">@nn.compact</span></h3>
+<div class="math">
+<span class="line"><span class="kw">class</span> <span class="fn">MLPSetup</span>(nn.Module):</span>
+<span class="line">    hidden: <span class="fn">int</span></span>
+<span class="line">    <span class="kw">def</span> <span class="fn">setup</span>(self):                          <span class="cmt"># runs when the module is bound</span></span>
+<span class="line">        self.fc1 = nn.Dense(self.hidden)</span>
+<span class="line">        self.out = nn.Dense(<span class="val">1</span>)</span>
+<span class="line">    <span class="kw">def</span> <span class="fn">__call__</span>(self, x):                     <span class="cmt"># no decorator here</span></span>
+<span class="line">        <span class="kw">return</span> nn.sigmoid(self.out(nn.tanh(self.fc1(x))))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">{'params': {'fc1': {'bias': (8,), 'kernel': (2, 8)},</span>
+<span class="line">            'out': {'bias': (1,), 'kernel': (8, 1)}}}</span>
+</div>
+<p>Identical tree to the explicitly-named compact version, because here the <span class="key">attribute name becomes the parameter name</span>. This shape will look familiar: it is PyTorch's layout, layers assigned in one method and used in another. The catch is that <span class="inline">setup</span> is still not <span class="inline">__init__</span>. It runs when Flax binds the module inside init or apply, not when you write <span class="inline">MLPSetup(hidden=8)</span>, which is why <span class="inline">m.fc1</span> from outside still fails.</p>
+<details><summary>Refresher: which one should I write, compact or setup?</summary>
+<div class="card">
+<p>Compact is the default and keeps the whole forward pass readable in one place. Reach for setup when a submodule is used in more than one method, when you need it in a non-<span class="inline">__call__</span> method such as <span class="inline">encode</span> and <span class="inline">decode</span>, or when the shared submodule must be constructed once and called several times. For reading, the practical difference is only where you go to find a layer's definition.</p>
+</div>
+</details>
+</div>
+
+<div class="card green">
+<h3>Step 5 &mdash; the tool that answers "what is this file actually building"</h3>
+<div class="math">
+<span class="line"><span class="fn">print</span>(MLP(hidden=<span class="val">8</span>).tabulate(jax.random.key(<span class="val">0</span>), X, console_kwargs={<span class="val">'width'</span>: <span class="val">84</span>, <span class="val">'no_color'</span>: <span class="fn">True</span>}))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run (blank separator rows removed)</span>
+<span class="line">                               MLP Summary</span>
+<span class="line">┏━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┓</span>
+<span class="line">┃ path    ┃ module ┃ inputs       ┃ outputs      ┃ params               ┃</span>
+<span class="line">┡━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━┩</span>
+<span class="line">│         │ MLP    │ float32[4,2] │ float32[4,1] │                      │</span>
+<span class="line">├─────────┼────────┼──────────────┼──────────────┼──────────────────────┤</span>
+<span class="line">│ Dense_0 │ Dense  │ float32[4,2] │ float32[4,8] │ bias: float32[8]     │</span>
+<span class="line">│         │        │              │              │ kernel: float32[2,8] │</span>
+<span class="line">│         │        │              │              │ 24 (96 B)            │</span>
+<span class="line">├─────────┼────────┼──────────────┼──────────────┼──────────────────────┤</span>
+<span class="line">│ Dense_1 │ Dense  │ float32[4,8] │ float32[4,1] │ bias: float32[1]     │</span>
+<span class="line">│         │        │              │              │ kernel: float32[8,1] │</span>
+<span class="line">│         │        │              │              │ 9 (36 B)             │</span>
+<span class="line">├─────────┼────────┼──────────────┼──────────────┼──────────────────────┤</span>
+<span class="line">│         │        │              │        Total │ 33 (132 B)           │</span>
+<span class="line">└─────────┴────────┴──────────────┴──────────────┴──────────────────────┘</span>
+<span class="line">                      Total Parameters: 33 (132 B)</span>
+</div>
+<p>This is the single most useful thing to run against an unfamiliar Flax file. It does an init behind the scenes and reports every submodule with the names it will actually get, the shape flowing in, the shape flowing out, and the parameter count. The 33 total is 24 + 9, which is 2&times;8 + 8 for the first layer and 8&times;1 + 1 for the second.</p>
+</div>
+<button class="nx" onclick="go(3)">Next: apply's extra arguments</button>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page" data-t="3. rngs & mutable">
+<h2>Why real code calls <span class="inline">apply</span> with four arguments</h2>
+
+<div class="card">
+<h3>The thing you will actually meet in a Google file</h3>
+<div class="math">
+<span class="line">logits, updates = state.apply_fn(</span>
+<span class="line">    {<span class="val">'params'</span>: params, <span class="val">'batch_stats'</span>: state.batch_stats},</span>
+<span class="line">    batch[<span class="val">'image'</span>],</span>
+<span class="line">    train=<span class="fn">True</span>,</span>
+<span class="line">    <span class="hl">rngs={'dropout': dropout_key}</span>,</span>
+<span class="line">    <span class="hl">mutable=['batch_stats']</span>)</span>
+</div>
+<p>Five arguments and two return values, where page 1 had <span class="inline">apply(params, x)</span> returning one thing. Both additions come from the same source: a pure function cannot own a random seed and cannot quietly update a counter, so anything that needs either must have it passed in and handed back.</p>
+</div>
+
+<div class="card orange">
+<h3>Step 1 &mdash; <span class="inline">rngs</span>, because dropout needs randomness it cannot generate</h3>
+<div class="math">
+<span class="line"><span class="kw">class</span> <span class="fn">WithDrop</span>(nn.Module):</span>
+<span class="line">    <span class="lbl">@nn.compact</span></span>
+<span class="line">    <span class="kw">def</span> <span class="fn">__call__</span>(self, x, train: <span class="fn">bool</span>):</span>
+<span class="line">        x = nn.Dense(<span class="val">3</span>)(x)</span>
+<span class="line">        <span class="kw">return</span> nn.Dropout(<span class="val">0.5</span>, deterministic=<span class="kw">not</span> train)(x)</span>
+<span class="line"></span>
+<span class="line">wd = WithDrop()</span>
+<span class="line">vd = wd.init(jax.random.key(<span class="val">0</span>), jnp.ones((<span class="val">1</span>,<span class="val">2</span>)), train=<span class="fn">False</span>)</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"apply(train=False) ok:"</span>, wd.apply(vd, jnp.ones((<span class="val">1</span>,<span class="val">2</span>)), train=<span class="fn">False</span>))</span>
+<span class="line"><span class="kw">try</span>:</span>
+<span class="line">    wd.apply(vd, jnp.ones((<span class="val">1</span>,<span class="val">2</span>)), train=<span class="fn">True</span>)</span>
+<span class="line"><span class="kw">except</span> <span class="fn">Exception</span> <span class="kw">as</span> e:</span>
+<span class="line">    <span class="fn">print</span>(<span class="val">f"{type(e).__name__}: {e}"</span>)</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"with rngs:"</span>, wd.apply(vd, jnp.ones((<span class="val">1</span>,<span class="val">2</span>)), train=<span class="fn">True</span>,</span>
+<span class="line">                          rngs={<span class="val">'dropout'</span>: jax.random.key(<span class="val">1</span>)}))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run (URL trimmed)</span>
+<span class="line">apply(train=False) ok: [[-1.7704698   1.1836556  -0.06655878]]</span>
+<span class="line">InvalidRngError: Dropout_0 needs PRNG for "dropout"</span>
+<span class="line">with rngs: [[-3.5409396   2.3673112   0.        ]]</span>
+</div>
+<p>Three lines, three states. With <span class="inline">train=False</span> dropout is a no-op and no randomness is needed. With <span class="inline">train=True</span> and no key, Flax refuses rather than inventing a seed, and it names the collection it wants: <span class="inline">"dropout"</span>. Given the key, it works, and you can see it working in the numbers: the third unit was zeroed, and the two survivors are exactly doubled, <span class="inline">-1.7704698</span> becoming <span class="inline">-3.5409396</span>. That doubling is dropout's rescaling by 1/(1&minus;0.5), so the expected value is unchanged.</p>
+<p>The dict key matters. A layer asks for a named stream, so <span class="inline">rngs={'params': k}</span> would not satisfy a dropout layer. That is also why <span class="inline">init</span> can take a bare key: it is shorthand for <span class="inline">{'params': key}</span>.</p>
+</div>
+
+<div class="card purple">
+<h3>Step 2 &mdash; <span class="inline">mutable</span>, because BatchNorm has state that is not a parameter</h3>
+<p>BatchNorm keeps a running mean and variance. They are updated every training step, but no gradient ever touches them, so they are not parameters. Flax puts them in a different <span class="key">collection</span>:</p>
+<div class="math">
+<span class="line"><span class="kw">class</span> <span class="fn">WithBN</span>(nn.Module):</span>
+<span class="line">    <span class="lbl">@nn.compact</span></span>
+<span class="line">    <span class="kw">def</span> <span class="fn">__call__</span>(self, x, train: <span class="fn">bool</span>):</span>
+<span class="line">        x = nn.Dense(<span class="val">3</span>)(x)</span>
+<span class="line">        <span class="kw">return</span> nn.BatchNorm(use_running_average=<span class="kw">not</span> train)(x)</span>
+<span class="line"></span>
+<span class="line">vb = WithBN().init(jax.random.key(<span class="val">0</span>), jnp.ones((<span class="val">4</span>,<span class="val">2</span>)), train=<span class="fn">False</span>)</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"collections:"</span>, <span class="fn">list</span>(vb.keys()))</span>
+<span class="line"><span class="fn">print</span>(jax.tree.map(jnp.shape, vb))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">collections: ['params', 'batch_stats']</span>
+<span class="line">{'batch_stats': {'BatchNorm_0': {'mean': (3,), 'var': (3,)}},</span>
+<span class="line"> 'params': {'BatchNorm_0': {'bias': (3,), 'scale': (3,)},</span>
+<span class="line">            'Dense_0': {'bias': (3,), 'kernel': (2, 3)}}}</span>
+</div>
+<p>This is why the thing <span class="inline">init</span> returns is called <span class="key">variables</span> and not params. It is a dict of collections, and <span class="inline">'params'</span> is only one of them. The same layer appears in two collections at once: <span class="inline">BatchNorm_0</span> has trainable <span class="inline">scale</span> and <span class="inline">bias</span> under params, and non-trainable <span class="inline">mean</span> and <span class="inline">var</span> under batch_stats.</p>
+<p>Now try to train with it:</p>
+<div class="math">
+<span class="line">WithBN().apply(vb, jnp.ones((<span class="val">4</span>,<span class="val">2</span>)), train=<span class="fn">True</span>)</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run (URL trimmed)</span>
+<span class="line">ModifyScopeVariableError: Cannot update variable "mean" in "/BatchNorm_0" because</span>
+<span class="line">collection "batch_stats" is immutable.</span>
+</div>
+<p>Everything is frozen unless you say otherwise, so the layer's attempt to write its running mean is refused. <span class="inline">mutable=['batch_stats']</span> is the permission slip, and granting it changes the return type:</p>
+<div class="math">
+<span class="line">y, updates = WithBN().apply(vb, jnp.ones((<span class="val">4</span>,<span class="val">2</span>)), train=<span class="fn">True</span>, mutable=[<span class="val">'batch_stats'</span>])</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"returned two things:"</span>, <span class="fn">type</span>(y).__name__, <span class="fn">list</span>(updates.keys()))</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"mean before:"</span>, vb[<span class="val">'batch_stats'</span>][<span class="val">'BatchNorm_0'</span>][<span class="val">'mean'</span>])</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"mean after :"</span>, updates[<span class="val">'batch_stats'</span>][<span class="val">'BatchNorm_0'</span>][<span class="val">'mean'</span>])</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">returned two things: ArrayImpl ['batch_stats']</span>
+<span class="line">mean before: [0. 0. 0.]</span>
+<span class="line">mean after : [-0.0177047   0.01183656 -0.00066559]</span>
+</div>
+<p>Read the last two lines against each other. The dict you passed in is unchanged, still zeros. The new numbers came back as a <em>separate return value</em> that you are now responsible for carrying to the next step. Nothing was mutated in place; the update was handed to you. That is the purity rule from chapter 4, showing up as an API shape.</p>
+<p>So the five-argument call at the top of this page decodes as: here are my numbers, here is my batch, run in training mode, here is the randomness you asked for, and yes you may write to batch_stats.</p>
+</div>
+<button class="nx" onclick="go(4)">Next: a full training step</button>
+</div>
+
+<!-- PAGE 4 -->
+<div class="page" data-t="4. A training step">
+<h2>The whole loop, and chapter 9's numbers to six decimals</h2>
+
+<div class="card blue">
+<h3>Step 1 &mdash; prove the dict is just a dict, by writing one</h3>
+<p>Chapter 9 trained XOR in four frameworks from identical weights: 2&rarr;8 tanh, 8&rarr;1 sigmoid, MSE, plain SGD at lr 0.5. The weights came from NumPy. If a Flax params dict is really nothing but a named nesting of arrays, we can build one by hand and Flax should accept it.</p>
+<div class="math">
+<span class="line">rng = np.random.default_rng(<span class="val">0</span>)</span>
+<span class="line">W1 = (rng.normal(size=(<span class="val">2</span>,<span class="val">8</span>))*<span class="val">0.5</span>).astype(np.float32); b1 = np.zeros(<span class="val">8</span>, np.float32)</span>
+<span class="line">W2 = (rng.normal(size=(<span class="val">8</span>,<span class="val">1</span>))*<span class="val">0.5</span>).astype(np.float32); b2 = np.zeros(<span class="val">1</span>, np.float32)</span>
+<span class="line"></span>
+<span class="line">params = {<span class="val">'params'</span>: {<span class="val">'Dense_0'</span>: {<span class="val">'kernel'</span>: jnp.array(W1), <span class="val">'bias'</span>: jnp.array(b1)},</span>
+<span class="line">                     <span class="val">'Dense_1'</span>: {<span class="val">'kernel'</span>: jnp.array(W2), <span class="val">'bias'</span>: jnp.array(b2)}}}</span>
+<span class="line"></span>
+<span class="line"><span class="fn">print</span>(<span class="val">"hand-built tree:"</span>, jax.tree.map(jnp.shape, params))</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"init tree      :"</span>, jax.tree.map(jnp.shape, mlp.init(jax.random.key(<span class="val">0</span>), Xd)))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">hand-built tree: {'params': {'Dense_0': {'bias': (8,), 'kernel': (2, 8)}, 'Dense_1': {'bias': (1,), 'kernel': (8, 1)}}}</span>
+<span class="line">init tree      : {'params': {'Dense_0': {'bias': (8,), 'kernel': (2, 8)}, 'Dense_1': {'bias': (1,), 'kernel': (8, 1)}}}</span>
+</div>
+<p>The two lines are identical, so the hand-built dict is indistinguishable from the one Flax makes. The only thing <span class="inline">init</span> was ever doing was producing a structure we could have typed ourselves.</p>
+</div>
+
+<div class="card green">
+<h3>Step 2 &mdash; the loop, in four lines of JAX you already know</h3>
+<div class="math">
+<span class="line"><span class="kw">def</span> <span class="fn">loss_fn</span>(p):</span>
+<span class="line">    <span class="kw">return</span> ((mlp.apply(p, Xd) - Yd)**<span class="val">2</span>).mean()</span>
+<span class="line"></span>
+<span class="line">p = params</span>
+<span class="line"><span class="kw">for</span> step <span class="kw">in</span> <span class="fn">range</span>(<span class="val">2001</span>):</span>
+<span class="line">    l, g = jax.value_and_grad(loss_fn)(p)</span>
+<span class="line">    <span class="kw">if</span> step <span class="kw">in</span> (<span class="val">0</span>,<span class="val">100</span>,<span class="val">500</span>,<span class="val">1000</span>,<span class="val">2000</span>): <span class="fn">print</span>(<span class="val">f"  step {step:5d}  loss {l:.6f}"</span>)</span>
+<span class="line">    p = <span class="hl">jax.tree.map(lambda a, b: a - 0.5*b, p, g)</span></span>
+<span class="line"><span class="fn">print</span>(<span class="val">"preds:"</span>, np.array(mlp.apply(p, Xd)).ravel().round(<span class="val">3</span>))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  step     0  loss 0.251708</span>
+<span class="line">  step   100  loss 0.177644</span>
+<span class="line">  step   500  loss 0.004852</span>
+<span class="line">  step  1000  loss 0.001573</span>
+<span class="line">  step  2000  loss 0.000609</span>
+<span class="line">preds: [0.016 0.973 0.975 0.029]</span>
+</div>
+<p>The highlighted line is the entire optimizer. <span class="inline">jax.tree.map</span> with two trees walks them together, so <span class="inline">a</span> is each parameter array and <span class="inline">b</span> is its gradient, and one expression updates all four arrays at once. This works only because grad handed back a tree shaped exactly like the params, which was page 1's closing observation.</p>
+<table>
+<tr><th>step</th><th><span class="fw np">np</span></th><th><span class="fw pt">pt</span></th><th><span class="fw tf">tf</span></th><th><span class="fw jx">jx</span></th><th style="color:#ce93d8">flax</th></tr>
+<tr><td>0</td><td class="num">0.251708</td><td class="num">0.251708</td><td class="num">0.251708</td><td class="num">0.251708</td><td class="num">0.251708</td></tr>
+<tr><td>100</td><td class="num">0.177644</td><td class="num">0.177644</td><td class="num">0.177644</td><td class="num">0.177644</td><td class="num">0.177644</td></tr>
+<tr><td>500</td><td class="num">0.004852</td><td class="num">0.004852</td><td class="num">0.004852</td><td class="num">0.004852</td><td class="num">0.004852</td></tr>
+<tr><td>1000</td><td class="num">0.001573</td><td class="num">0.001573</td><td class="num">0.001573</td><td class="num">0.001573</td><td class="num">0.001573</td></tr>
+<tr><td>2000</td><td class="num">0.000609</td><td class="num">0.000609</td><td class="num">0.000609</td><td class="num">0.000609</td><td class="num">0.000609</td></tr>
+</table>
+<p>Chapter 9's four columns, plus Flax. The predictions <span class="inline">[0.016 0.973 0.975 0.029]</span> also match chapter 9's NumPy output exactly. Flax added naming and structure. It did not add one bit of arithmetic.</p>
+</div>
+
+<div class="card purple">
+<h3>Step 3 &mdash; the same loop the way production writes it</h3>
+<p>Two pieces you will see in every real file. <span class="inline">optax</span> supplies optimizers as pure functions, and <span class="inline">TrainState</span> is a small container that carries the params, the update rule and the step count together.</p>
+<div class="math">
+<span class="line"><span class="kw">import</span> optax</span>
+<span class="line"><span class="kw">from</span> flax.training <span class="kw">import</span> train_state</span>
+<span class="line"></span>
+<span class="line">state = train_state.TrainState.create(</span>
+<span class="line">    apply_fn=mlp.apply,            <span class="cmt"># the module's apply, stored for later</span></span>
+<span class="line">    params=params[<span class="val">'params'</span>],       <span class="cmt"># note: the INNER dict, not the variables dict</span></span>
+<span class="line">    tx=optax.sgd(<span class="val">0.5</span>))              <span class="cmt"># same rule as the hand-written line above</span></span>
+<span class="line"></span>
+<span class="line"><span class="lbl">@jax.jit</span></span>
+<span class="line"><span class="kw">def</span> <span class="fn">train_step</span>(state):</span>
+<span class="line">    <span class="kw">def</span> <span class="fn">lf</span>(pr):</span>
+<span class="line">        <span class="kw">return</span> ((state.apply_fn({<span class="val">'params'</span>: pr}, Xd) - Yd)**<span class="val">2</span>).mean()</span>
+<span class="line">    l, g = jax.value_and_grad(lf)(state.params)</span>
+<span class="line">    <span class="kw">return</span> state.apply_gradients(grads=g), l    <span class="cmt"># returns a NEW state</span></span>
+<span class="line"></span>
+<span class="line"><span class="kw">for</span> step <span class="kw">in</span> <span class="fn">range</span>(<span class="val">2001</span>):</span>
+<span class="line">    state, l = train_step(state)</span>
+<span class="line">    <span class="kw">if</span> step <span class="kw">in</span> (<span class="val">0</span>,<span class="val">100</span>,<span class="val">500</span>,<span class="val">1000</span>,<span class="val">2000</span>): <span class="fn">print</span>(<span class="val">f"  step {step:5d}  loss {l:.6f}"</span>)</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  step     0  loss 0.251708</span>
+<span class="line">  step   100  loss 0.177644</span>
+<span class="line">  step   500  loss 0.004852</span>
+<span class="line">  step  1000  loss 0.001573</span>
+<span class="line">  step  2000  loss 0.000609</span>
+</div>
+<p>Same five numbers. Three reading notes, because these trip people up:</p>
+<ul>
+<li><strong><span class="inline">params=params['params']</span>.</strong> TrainState holds the inner dict, so the loss function has to rebuild the outer wrapper as <span class="inline">{'params': pr}</span>. Getting this level wrong produces a key error that reads like a missing layer.</li>
+<li><strong><span class="inline">state.apply_gradients</span> returns a new state.</strong> It does not modify the old one, so <span class="inline">state = train_step(state)</span> is required. Dropping the assignment trains nothing and raises no error.</li>
+<li><strong><span class="inline">@jax.jit</span> on the step, not the model.</strong> Chapter 4's rule: compile the largest pure function you have. The state goes in and comes out as a pytree, which is exactly what jit wants.</li>
+</ul>
+</div>
+<button class="nx" onclick="go(5)">Next: NNX, and reading both</button>
+</div>
+
+<!-- PAGE 5 -->
+<div class="page" data-t="5. NNX & reading both">
+<h2>NNX: the same machine with the plumbing hidden</h2>
+
+<div class="card orange">
+<h3>Which one will you actually open?</h3>
+<p>Flax has two APIs and you need to read both. <span class="key">Linen</span> is everything on pages 0 to 4: <span class="inline">nn.Module</span>, init and apply, the explicit dict. <span class="key">NNX</span> is the newer API, and the Flax documentation states it is going to replace linen. MaxText, Google's open reference for large language model training, migrated from linen to NNX in June 2026.</p>
+<p>That does not make linen safe to skip. It is what a large existing corpus is written in, it is what older checkpoints and model files assume, and Flax ships a bridge specifically so the two can be mixed in one codebase. More to the point for understanding: linen shows you the mechanism that NNX hides.</p>
+</div>
+
+<div class="card purple">
+<h3>Step 1 &mdash; the same layer, and the attribute that now works</h3>
+<div class="math">
+<span class="line"><span class="kw">from</span> flax <span class="kw">import</span> nnx</span>
+<span class="line"></span>
+<span class="line">lin = nnx.Linear(<span class="val">2</span>, <span class="val">3</span>, rngs=nnx.Rngs(<span class="val">0</span>))    <span class="cmt"># in AND out, plus the key, right here</span></span>
+<span class="line"><span class="fn">print</span>(<span class="val">"type(lin.kernel)      :"</span>, <span class="fn">type</span>(lin.kernel).__name__)</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"lin.kernel[...] shape :"</span>, lin.kernel[...].shape)</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"params live INSIDE the object:"</span>, <span class="fn">isinstance</span>(lin.kernel, nnx.Param))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">type(lin.kernel)      : Param</span>
+<span class="line">lin.kernel[...] shape : (2, 3)</span>
+<span class="line">params live INSIDE the object: True</span>
+</div>
+<p>Page 0's failing line now works. Three differences to register: the layer takes <span class="key">both</span> dimensions, so nothing has to be discovered from an input and there is no separate init call; the random key is a constructor argument; and the array is wrapped in a <span class="inline">Param</span> box, which you open with <span class="inline">[...]</span>. In older code you will see <span class="inline">.value</span> for that, which still works but is deprecated.</p>
+</div>
+
+<div class="card green">
+<h3>Step 2 &mdash; the functional core is still there, one call away</h3>
+<p>If parameters live in the object, how does <span class="inline">jax.grad</span> differentiate with respect to them? The answer is that NNX pulls them out on demand:</p>
+<div class="math">
+<span class="line">graphdef, state = <span class="hl">nnx.split(lin)</span></span>
+<span class="line"><span class="fn">print</span>(<span class="val">"state pure dict:"</span>, jax.tree.map(jnp.shape, nnx.to_pure_dict(state)))</span>
+<span class="line">rebuilt = <span class="hl">nnx.merge(graphdef, state)</span></span>
+<span class="line">x = jnp.ones((<span class="val">1</span>,<span class="val">2</span>))</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"same output after merge:"</span>, <span class="fn">bool</span>(jnp.all(rebuilt(x) == lin(x))))</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">state pure dict: {'bias': (3,), 'kernel': (2, 3)}</span>
+<span class="line">same output after merge: True</span>
+</div>
+<p>Read <span class="inline">state</span> against page 0's output. It is the same nesting of the same names with the same shapes. <span class="inline">nnx.split</span> gives back exactly linen's two objects: a <span class="inline">graphdef</span>, which is the structure and code, and a <span class="inline">state</span>, which is the numbers. <span class="inline">nnx.merge</span> puts them back together.</p>
+<p>So <span class="inline">nnx.jit</span> and <span class="inline">nnx.value_and_grad</span> are not new kinds of transformation. Each one splits your module, calls ordinary <span class="inline">jax.jit</span> or <span class="inline">jax.grad</span> on the pure part, and merges the result back. <span class="key">The dict never went away. You stopped typing it.</span></p>
+</div>
+
+<div class="card blue">
+<h3>Step 3 &mdash; same weights, same losses, third time</h3>
+<p>Load chapter 9's exact arrays into the NNX object and train it:</p>
+<div class="math">
+<span class="line"><span class="kw">class</span> <span class="fn">NMLP</span>(nnx.Module):</span>
+<span class="line">    <span class="kw">def</span> <span class="fn">__init__</span>(self, rngs):</span>
+<span class="line">        self.fc1 = nnx.Linear(<span class="val">2</span>, <span class="val">8</span>, rngs=rngs)</span>
+<span class="line">        self.out = nnx.Linear(<span class="val">8</span>, <span class="val">1</span>, rngs=rngs)</span>
+<span class="line">    <span class="kw">def</span> <span class="fn">__call__</span>(self, x):</span>
+<span class="line">        <span class="kw">return</span> jax.nn.sigmoid(self.out(jnp.tanh(self.fc1(x))))</span>
+<span class="line"></span>
+<span class="line">nm = NMLP(nnx.Rngs(<span class="val">0</span>))</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"before load, fc1.kernel[0,:3] ="</span>, np.array(nm.fc1.kernel[...][<span class="val">0</span>,:<span class="val">3</span>]).round(<span class="val">6</span>))</span>
+<span class="line">nm.fc1.kernel[...] = jnp.array(W1);  nm.fc1.bias[...] = jnp.array(b1)</span>
+<span class="line">nm.out.kernel[...] = jnp.array(W2);  nm.out.bias[...] = jnp.array(b2)</span>
+<span class="line"><span class="fn">print</span>(<span class="val">"after  load, fc1.kernel[0,:3] ="</span>, np.array(nm.fc1.kernel[...][<span class="val">0</span>,:<span class="val">3</span>]).round(<span class="val">6</span>))</span>
+<span class="line"></span>
+<span class="line"><span class="lbl">@nnx.jit</span></span>
+<span class="line"><span class="kw">def</span> <span class="fn">nstep</span>(model, opt):</span>
+<span class="line">    <span class="kw">def</span> <span class="fn">lf</span>(m): <span class="kw">return</span> ((m(Xd) - Yd)**<span class="val">2</span>).mean()</span>
+<span class="line">    l, g = nnx.value_and_grad(lf)(model)</span>
+<span class="line">    opt.update(model, g)                <span class="cmt"># mutates, torch-style</span></span>
+<span class="line">    <span class="kw">return</span> l</span>
+<span class="line"></span>
+<span class="line">opt = nnx.Optimizer(nm, optax.sgd(<span class="val">0.5</span>), wrt=nnx.Param)</span>
+<span class="line"><span class="kw">for</span> step <span class="kw">in</span> <span class="fn">range</span>(<span class="val">2001</span>):</span>
+<span class="line">    l = nstep(nm, opt)</span>
+<span class="line">    <span class="kw">if</span> step <span class="kw">in</span> (<span class="val">0</span>,<span class="val">100</span>,<span class="val">500</span>,<span class="val">1000</span>,<span class="val">2000</span>): <span class="fn">print</span>(<span class="val">f"  step {step:5d}  loss {l:.6f}"</span>)</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">before load, fc1.kernel[0,:3] = [ 0.75673  -0.685701 -0.568834]</span>
+<span class="line">after  load, fc1.kernel[0,:3] = [ 0.062865 -0.066052  0.320211]</span>
+<span class="line">  step     0  loss 0.251708</span>
+<span class="line">  step   100  loss 0.177644</span>
+<span class="line">  step   500  loss 0.004852</span>
+<span class="line">  step  1000  loss 0.001573</span>
+<span class="line">  step  2000  loss 0.000609</span>
+</div>
+<p>The "before" line is NNX's own initializer, which is a different scheme from chapter 9's. After the assignment the weights are chapter 9's, and the losses are chapter 9's. Two Flax dialects, four other frameworks, one set of numbers.</p>
+<p>Two NNX-specific lines to read. <span class="inline">opt.update(model, g)</span> genuinely mutates the model object, which is the ergonomics chapter 3 gave up when moving to JAX. And <span class="inline">wrt=nnx.Param</span> tells the optimizer which boxes count as trainable, since an NNX module can also hold non-trainable state.</p>
+</div>
+
+<div class="card">
+<h3>Step 4 &mdash; the translation table</h3>
+<table>
+<tr><th style="width:34%">linen</th><th style="width:34%">NNX</th><th>what changed</th></tr>
+<tr><td><span class="inline">nn.Dense(8)</span></td><td><span class="inline">nnx.Linear(2, 8, rngs=rngs)</span></td><td>input size is explicit, so nothing is inferred from data</td></tr>
+<tr><td><span class="inline">@nn.compact</span> in <span class="inline">__call__</span></td><td>plain <span class="inline">__init__</span></td><td>layers built in the constructor, as in torch</td></tr>
+<tr><td><span class="inline">v = model.init(key, x)</span></td><td><span class="inline">model = MLP(nnx.Rngs(0))</span></td><td>no separate init step at all</td></tr>
+<tr><td><span class="inline">model.apply(v, x)</span></td><td><span class="inline">model(x)</span></td><td>calling the object just works</td></tr>
+<tr><td>the variables dict</td><td><span class="inline">nnx.split(model)</span></td><td>same dict, produced on demand</td></tr>
+<tr><td><span class="inline">rngs={'dropout': k}</span> at apply</td><td><span class="inline">nnx.Rngs</span> held by the module</td><td>the stream lives in the object</td></tr>
+<tr><td><span class="inline">mutable=['batch_stats']</span></td><td>just assign to it</td><td>mutation is allowed again</td></tr>
+<tr><td><span class="inline">jax.jit</span> on a pure step</td><td><span class="inline">nnx.jit</span> on a module step</td><td>split and merge wrapped around jit</td></tr>
+</table>
+</div>
+
+<div class="card red">
+<h3>Step 5 &mdash; the annotation that makes Google code look alien</h3>
+<p>One more thing you will hit immediately in a real model file, and it is not in any tutorial model:</p>
+<div class="math">
+<span class="line">nn.Dense(<span class="val">8</span>, kernel_init=<span class="hl">nn.with_partitioning(</span>nn.initializers.lecun_normal(), (<span class="val">'data'</span>, <span class="val">'model'</span>)<span class="hl">)</span>)(x)</span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run, inspecting the resulting parameter</span>
+<span class="line">type  : Partitioned</span>
+<span class="line">shape : (2, 8)</span>
+<span class="line">names : ('data', 'model')</span>
+<span class="line">unbox : ArrayImpl (2, 8)</span>
+</div>
+<p>The parameter is no longer a bare array. It is boxed in a <span class="inline">Partitioned</span> wrapper carrying one axis name per dimension, saying how this weight should be split across the device mesh: rows along the <span class="inline">data</span> axis, columns along the <span class="inline">model</span> axis. <span class="inline">nn.meta.unbox</span> takes the array back out. This is the payoff of parameters being a separate pytree. Sharding is a property you attach to the tree, and the model code never mentions devices.</p>
+</div>
+<button class="nx" onclick="go(6)">Next: map &amp; questions</button>
+</div>
+
+<!-- PAGE 6 -->
+<div class="page" data-t="6. Map & questions">
+<h2>The map, the traps, and where Flax came from</h2>
+
+<div class="card blue">
+<h3>One table, the whole chapter</h3>
+<table>
+<tr><th>question</th><th><span class="fw pt">pt</span> PyTorch</th><th style="color:#ce93d8">Flax linen</th><th style="color:#ce93d8">Flax NNX</th></tr>
+<tr><td>where are the weights</td><td>in the module</td><td>in a dict you hold</td><td>in the module</td></tr>
+<tr><td>how do they get made</td><td><span class="inline">__init__</span></td><td><span class="inline">init(key, x)</span>, by running the body</td><td><span class="inline">__init__</span> with an rngs object</td></tr>
+<tr><td>forward call</td><td><span class="inline">model(x)</span></td><td><span class="inline">model.apply(v, x)</span></td><td><span class="inline">model(x)</span></td></tr>
+<tr><td>what grad differentiates</td><td><span class="inline">.grad</span> on each leaf</td><td>the params argument</td><td>split, then the state</td></tr>
+<tr><td>optimizer step</td><td>mutates in place</td><td>returns a new tree</td><td>mutates in place</td></tr>
+<tr><td>non-trainable state</td><td>buffers</td><td>a second collection plus <span class="inline">mutable=</span></td><td>a non-Param variable</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h3>Traps</h3>
+<ul>
+<li><strong>Auto names follow construction order, not call order.</strong> Moving one line renames checkpoint keys. Pass <span class="inline">name=</span> in anything you will save.</li>
+<li><strong>The kernel is (in, out).</strong> Torch stores (out, in). Copying weights across without a transpose runs fine and trains badly.</li>
+<li><strong>Two levels of dict.</strong> <span class="inline">variables</span> holds collections; <span class="inline">variables['params']</span> holds layers. TrainState stores the inner one.</li>
+<li><strong>Everything is frozen by default.</strong> A layer that wants to write state fails until you pass <span class="inline">mutable=</span>, and then apply returns a pair instead of a value.</li>
+<li><strong>Nothing mutates.</strong> <span class="inline">apply_gradients</span> returns a new state; if you drop the assignment, training silently does nothing.</li>
+<li><strong>The initializer runs during apply.</strong> It is a shape check, not a bug, and its value is discarded.</li>
+<li><strong><span class="inline">setup</span> is not <span class="inline">__init__</span>.</strong> It runs at bind time, so attributes it defines are still unreachable from outside.</li>
+</ul>
+</div>
+
+<div class="card green">
+<h3>Follow-up questions, one-line answers</h3>
+<table>
+<tr><th>question</th><th>one-line answer</th></tr>
+<tr><td>Why does init need an input at all?</td><td>It runs your forward pass for real, and shapes like the kernel's input dimension are only knowable from a real array.</td></tr>
+<tr><td>Why can't I read <span class="inline">model.kernel</span>?</td><td>The module holds no numbers; a parameter only exists while a dict is bound, which happens inside init and apply.</td></tr>
+<tr><td>What is the difference between a field and a param?</td><td>Fields are dataclass annotations, readable immediately, never trained. Params come from <span class="inline">self.param</span>, unreadable from outside, always trained.</td></tr>
+<tr><td>Why is it called variables and not params?</td><td>It is a dict of collections. <span class="inline">params</span> is one; <span class="inline">batch_stats</span> is another; a model can define more.</td></tr>
+<tr><td>When do I need <span class="inline">rngs=</span>?</td><td>When a layer asks for a named random stream at call time, dropout being the usual one. Flax errors rather than inventing a seed.</td></tr>
+<tr><td>Why does apply sometimes return two things?</td><td>Because you passed <span class="inline">mutable=</span>. The updated collections come back as a second value for you to carry forward.</td></tr>
+<tr><td>Is NNX a different framework?</td><td>No. <span class="inline">nnx.split</span> produces linen's exact structure; the transformations split, call plain JAX, and merge back.</td></tr>
+<tr><td>Which should I learn to read first?</td><td>Both, and linen first, because it makes the parameter tree visible instead of hiding it.</td></tr>
+<tr><td>What are those axis-name tuples in model files?</td><td><span class="inline">nn.with_partitioning</span> boxes a parameter with one mesh axis name per dimension, so sharding is attached to the tree rather than the code.</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h3>Where it came from</h3>
+<p style="font-size:.88em">Flax began at Google Brain in 2020 as a rewrite of an earlier JAX network library, with linen as its second-generation API. DeepMind maintained a competing library, Haiku, until July 2023, when it entered maintenance mode and DeepMind recommended Flax for new projects, citing a broader feature set and more adoption outside Alphabet. NNX was designed to answer linen's main complaint, that the functional style is hard to learn and hard to debug, by putting parameters back inside module objects while keeping the functional core reachable through split and merge. Flax's documentation now describes NNX as the API that will replace linen, and MaxText completed its migration in June 2026.</p>
+</div>
+
+<div class="card">
+<h3>Sources and environment</h3>
+<p style="font-size:.88em">Every output on these pages is from a real run, September 2026, Python 3.12 on Apple M3: <span class="inline">jax 0.11.1</span>, <span class="inline">flax 0.12.9</span>, <span class="inline">optax 0.2.8</span>. The PyTorch comparison on page 0 was run separately under <span class="inline">torch 2.8.0</span>. Chapter 9's weights are regenerated here with <span class="inline">np.random.default_rng(0)</span>, normal draws scaled by 0.5, zero biases, float32, and reproduce that chapter's five loss checkpoints exactly. Error messages had their documentation URLs trimmed; the tabulate output had blank separator rows removed. Documentation: the Flax linen-to-NNX migration guide, the linen setup-versus-compact guide, and the Haiku README's maintenance notice.</p>
+</div>
+<a class="nx" href="../index.html">Back to the course index &rarr;</a>
+</div>
+<script>
+const pages=document.querySelectorAll('.page'),nav=document.getElementById('nav');
+pages.forEach((p,i)=>{
+  const b=document.createElement('button');
+  b.textContent=p.dataset.t;
+  b.onclick=()=>go(i);
+  if(i===0)b.classList.add('on');
+  nav.appendChild(b);
+});
+function go(n){
+  pages.forEach((p,i)=>p.classList.toggle('on',i===n));
+  nav.querySelectorAll('button').forEach((b,i)=>{
+    b.classList.remove('on');
+    if(i<n)b.classList.add('done');
+    else b.classList.remove('done');
+    if(i===n)b.classList.add('on');
+  });
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+</script>
+</body>
+</html>

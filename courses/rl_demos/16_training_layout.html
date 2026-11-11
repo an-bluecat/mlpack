@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 16: The Training Layout — Which GPUs Do What</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:880px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 12px;border:1px solid #333;text-align:center;font-size:.88em}
+th{background:#1a1a3a;color:#4fc3f7}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',monospace;font-size:.85em;line-height:1.8;overflow-x:auto}
+.math .line{margin:2px 0;white-space:pre}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.key{color:#ffb74d;font-weight:600}
+details.more{background:#12122a;border:1px solid #2a2a4a;border-radius:10px;padding:10px 14px;margin:10px 0}
+details.more summary{cursor:pointer;color:#4fc3f7;font-size:.92em;font-weight:600}
+details.more[open] summary{margin-bottom:8px}
+.scroll{overflow-x:auto}
+.src{font-size:.82em;color:#888;margin-top:8px}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+<h1>Chapter 16: The Training Layout</h1>
+<p class="sub">Every chapter so far described a <em>loss</em>. This one describes the <em>machine</em>: which models are resident for PPO vs GRPO vs distillation, which GPUs generate, which train, and why "just use the same GPUs for both" is the right default until suddenly it isn't.</p>
+<div class="nav" id="nav"></div>
+
+<!-- ============================ PAGE 0 ============================ -->
+<div class="page on" data-t="0. The Squeeze">
+<h2>Why This Is a Real Problem: Two Jobs That Both Want All the Memory</h2>
+
+<div class="card blue">
+<h3>The loop, and the two hats one model has to wear</h3>
+<p>Every method from chapter 5 onward has the same shape:</p>
+<div class="math">
+<div class="line">1. GENERATE   sample responses from the current policy   <span class="cmt">// inference job</span></div>
+<div class="line">2. SCORE      verifier, reward model, or teacher</div>
+<div class="line">3. UPDATE     backward + optimizer step                  <span class="cmt">// training job</span></div>
+<div class="line">4. repeat &mdash; and step 1 must use the UPDATED weights</div>
+</div>
+<p style="margin-top:6px">Steps 1 and 3 use the <em>same model</em> but want completely different things from a GPU. That conflict is this whole chapter.</p>
+</div>
+
+<div class="card">
+<h3>Count the bytes &mdash; training state first</h3>
+<p>An 8B model under mixed-precision AdamW. Per parameter:</p>
+<div class="scroll"><table>
+<tr><th>what</th><th>bytes/param</th><th>for 8B</th></tr>
+<tr><td>bf16 weights</td><td>2</td><td>14.9 GB</td></tr>
+<tr><td>fp32 master copy</td><td>4</td><td>29.8 GB</td></tr>
+<tr><td>Adam <em>m</em> (fp32)</td><td>4</td><td>29.8 GB</td></tr>
+<tr><td>Adam <em>v</em> (fp32)</td><td>4</td><td>29.8 GB</td></tr>
+<tr><td>bf16 gradient</td><td>2</td><td>14.9 GB</td></tr>
+<tr><td><strong>total</strong></td><td><strong>16</strong></td><td><strong>119 GB</strong></td></tr>
+</table></div>
+<p style="margin-top:6px">Note the ratio hiding in that table: <span class="key">training costs 16 bytes/param, inference costs 2</span> &mdash; an 8&times; difference. A model you can serve on one GPU may need eight to train.</p>
+</div>
+
+<div class="card red">
+<h3>Now count the KV cache &mdash; and this is the number that decides the architecture</h3>
+<p>To generate, the inference engine caches keys and values for every token of every in-flight sequence. Llama-3-8B geometry (32 layers, 8 KV heads with GQA, head_dim 128, bf16):</p>
+<div class="math">
+<div class="line">per token = 2 (K,V) &times; 32 layers &times; 8 heads &times; 128 dim &times; 2 bytes</div>
+<div class="line">          = 131,072 bytes = <span class="val">128 KB per token</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">a 2,048-token sequence   &rarr; 0.25 GB</div>
+<div class="line">a 20,480-token sequence  &rarr; <span class="val">2.50 GB</span>   <span class="cmt">// DAPO's cap, ch. 15</span></div>
+</div>
+<p style="margin-top:8px">Now put it against the training state, for a realistic batch (256 sequences, as in ch. 11) on a full node of 8&times;H100 80GB = <strong>640 GB</strong> of HBM:</p>
+<div class="scroll"><table>
+<tr><th>what</th><th>memory</th><th>fits in 640 GB alongside training?</th></tr>
+<tr><td>training state (8B, AdamW)</td><td>119 GB</td><td>yes &mdash; 15 GB per GPU sharded</td></tr>
+<tr><td>KV for 32 seqs @ 2,048 tok</td><td>8 GB</td><td style="color:#4caf50">comfortably</td></tr>
+<tr><td>KV for 256 seqs @ 20,480 tok</td><td style="color:#ef5350"><strong>640 GB</strong></td><td style="color:#ef5350">no &mdash; that is the entire node, by itself</td></tr>
+</table></div>
+<p style="margin-top:8px"><span class="key">Read the last row.</span> At long-reasoning lengths the KV cache is <strong>five times larger than the whole training state</strong>. It is not a rounding error competing with optimizer memory &mdash; it <em>is</em> the dominant consumer. Everything in this chapter follows from that one inequality.</p>
+</div>
+
+<div class="card green">
+<h3>So there are exactly three things you can trade</h3>
+<div class="math">
+<div class="line">(a) <span class="lbl">SHARE</span> the GPUs and time-slice   &rarr; tab 2, "colocated"</div>
+<div class="line">(b) <span class="lbl">SPLIT</span> the GPUs into two pools  &rarr; tab 3, "disaggregated"</div>
+<div class="line">(c) <span class="lbl">SHRINK</span> the batch or the length  &rarr; always available, always painful</div>
+</div>
+<p style="margin-top:6px">And your instinct that you might just use the trainer GPUs to generate is not only valid &mdash; <strong>it is the standard default.</strong> Tab 2 is that design &mdash; but first, tab 1 counts how many models are even in the room, because that number differs a lot between PPO, GRPO and distillation.</p>
+</div>
+
+<button class="nx" onclick="go(1)">Next: which models are in the room &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 1: THE ROSTER ============================ -->
+<div class="page" data-t="1. The Roster">
+<h2>Which Models Are Actually in the Room</h2>
+
+<div class="card blue">
+<h3>Before asking which GPU does what, ask how many models there are</h3>
+<p>"The policy" is never the only thing resident. Each algorithm needs a different cast, and each member is either <strong>trained</strong> (16 bytes/param &mdash; weights, fp32 master, Adam <em>m</em> and <em>v</em>, gradient) or <strong>frozen</strong> (2 bytes/param &mdash; bf16 weights, forward passes only). At 8B per model:</p>
+<div class="scroll"><table>
+<tr><th>algorithm</th><th>models resident</th><th>total</th></tr>
+<tr><td><strong>PPO / RLHF</strong> (<a href="5_ppo.html" style="color:#4fc3f7">ch. 5</a>)</td><td>policy <span style="color:#ef5350">T</span> + critic <span style="color:#ef5350">T</span> + reward model <span style="color:#888">F</span> + reference <span style="color:#888">F</span></td><td><strong>268 GB</strong></td></tr>
+<tr><td><strong>GRPO</strong> (<a href="7_grpo.html" style="color:#4fc3f7">ch. 7</a>)</td><td>policy <span style="color:#ef5350">T</span> + reference <span style="color:#888">F</span> &nbsp;<span class="cmt">(verifier is code, not a model)</span></td><td>134 GB</td></tr>
+<tr><td><strong>DAPO</strong> (<a href="15_dapo.html" style="color:#4fc3f7">ch. 15</a>)</td><td>policy <span style="color:#ef5350">T</span> &nbsp;<span class="cmt">(KL deleted, so no reference)</span></td><td style="color:#4caf50"><strong>119 GB</strong></td></tr>
+<tr><td><strong>on-policy distillation</strong> (<a href="11_on_policy_distillation.html" style="color:#4fc3f7">ch. 11</a>)</td><td>student <span style="color:#ef5350">T</span> + teacher <span style="color:#888">F</span></td><td>134 GB</td></tr>
+</table></div>
+<p style="margin-top:8px"><span class="key">Read it as a progression and the whole arc of Part 2 falls out:</span></p>
+<div class="math">
+<div class="line">PPO  &rarr; GRPO : delete the CRITIC     &rarr; saves <span class="val">119 GB</span> (44% of PPO's total)</div>
+<div class="line">GRPO &rarr; DAPO : delete the REFERENCE  &rarr; saves 15 GB <span class="cmt">+ a whole forward pass per step</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">PPO &rarr; DAPO overall: <span class="val">2.2&times;</span> less model memory</div>
+</div>
+<p style="margin-top:6px">Chapter 7 tells you GRPO drops the critic because a group mean is a cheaper baseline than a learned value function. This table is <em>why that mattered enough to name an algorithm after</em>: the critic is a second <strong>trained</strong> model, so deleting it removes more memory than the reward model and reference combined.</p>
+</div>
+
+<div class="card green">
+<h3>The one that surprises people: the verifier is not a model</h3>
+<div class="math">
+<div class="line"><span class="cmt">// RLHF's grader — a neural network, needs a GPU:</span></div>
+<div class="line">reward = <span class="fn">RM</span>(prompt, response)        <span class="cmt">// 15 GB resident, forward pass per response</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// GRPO/DAPO's grader — ordinary code, runs on CPU:</span></div>
+<div class="line"><span class="kw">def</span> <span class="fn">reward</span>(response, answer):</div>
+<div class="line">    <span class="kw">return</span> <span class="num">1.0</span> <span class="kw">if</span> <span class="fn">extract_number</span>(response) == answer <span class="kw">else</span> <span class="num">0.0</span></div>
+<div class="line"><span class="cmt">// 0 GB. 0 GPU time.</span></div>
+</div>
+<p style="margin-top:6px">So "verifiable rewards" is not only an argument about reward hacking (ch. 15 tab 5) &mdash; it is also a systems win. You delete a model from the room and replace it with a function call.</p>
+</div>
+
+<button class="nx" onclick="go(2)">Next: colocated &mdash; one pool, time-sliced &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 1 ============================ -->
+<div class="page" data-t="2. Colocated">
+<h2>Colocated: The Same GPUs Do Both, In Turns</h2>
+
+<div class="card green">
+<h3>The design</h3>
+<p>One pool of GPUs holds everything and alternates roles. This is verl&#x2019;s <strong>HybridEngine</strong>, and it is what most open-source RL post-training runs on.</p>
+<div class="math">
+<div class="line"><span class="cmt">// ---- generation phase ----</span></div>
+<div class="line">free the gradient buffers</div>
+<div class="line">offload optimizer state (Adam m, v) to CPU RAM</div>
+<div class="line">hand the freed HBM to the inference engine's KV cache</div>
+<div class="line">generate 256 sequences</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// ---- training phase ----</span></div>
+<div class="line">tell the engine to release its KV cache   <span class="cmt">// vLLM calls this "sleep"</span></div>
+<div class="line">bring the optimizer state back from CPU</div>
+<div class="line">forward, backward, step</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// ---- repeat ----</span></div>
+</div>
+<p style="margin-top:8px">The two phases are strictly <strong>serialized</strong>: while generating, nothing trains; while training, nothing generates.</p>
+</div>
+
+<div class="card blue">
+<h3>Why this is the sensible default</h3>
+<div class="scroll"><table>
+<tr><th>advantage</th><th>why it matters</th></tr>
+<tr><td><strong>Weight sync is nearly free</strong></td><td>The updated weights are <em>already on the device</em> the generator will use. No network transfer &mdash; a local reshard at worst. Compare tab 2, where you broadcast billions of parameters every sync.</td></tr>
+<tr><td><strong>Strictly on-policy for free</strong></td><td>Generation cannot start until the update finishes, so the data always comes from the current weights. No staleness to correct.</td></tr>
+<tr><td><strong>No idle pool</strong></td><td>Every GPU is doing the one thing that is happening. In a split layout, whichever pool is not the bottleneck is partly idle.</td></tr>
+<tr><td><strong>Much simpler</strong></td><td>One resource pool, one process group, no queue between two clusters, no separate failure domains.</td></tr>
+</table></div>
+</div>
+
+<div class="card orange">
+<h3>What it costs you</h3>
+<ul style="margin-left:18px;margin-top:4px">
+<li><strong>No overlap.</strong> Generation is usually the long pole; during it, all your expensive training capacity is doing inference work it is over-provisioned for.</li>
+<li><strong>The KV cache is squeezed.</strong> Even with the optimizer offloaded, the weights and activations stay resident, so the engine gets a fraction of HBM. In verl this is literally a knob &mdash; <code>vllm_gpu_memory_utilization</code>, dropped from ~0.90 to ~0.80 when sharing &mdash; and a smaller KV budget means fewer concurrent sequences, which means slower generation.</li>
+<li><strong>Offload traffic.</strong> Shuttling ~60 GB of Adam state to CPU and back every iteration is not free.</li>
+</ul>
+<p style="margin-top:8px">Notice the vicious bit: colocating makes generation slower <em>exactly when</em> generation is already the bottleneck, because it is the KV budget you took away.</p>
+</div>
+
+<button class="nx" onclick="go(3)">Next: disaggregated &mdash; two pools &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 2 ============================ -->
+<div class="page" data-t="3. Disaggregated">
+<h2>Disaggregated: Two Pools, and Now Time Runs in Parallel</h2>
+
+<div class="card blue">
+<h3>The design</h3>
+<div class="math">
+<div class="line"><span class="lbl">GENERATOR pool</span>   student weights, bf16 only        <span class="cmt">// 15 GB for 8B</span></div>
+<div class="line">                  no gradients, no optimizer state</div>
+<div class="line">                  &rarr; ALL remaining HBM goes to KV cache</div>
+<div class="line">                  runs vLLM / SGLang</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="lbl">TRAINER pool</span>     weights + gradients + optimizer    <span class="cmt">// 119 GB for 8B</span></div>
+<div class="line">                  sharded (FSDP / ZeRO)</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// they run AT THE SAME TIME, connected by a queue:</span></div>
+<div class="line">generator &mdash;&mdash;rollouts&mdash;&mdash;&gt; [queue] &mdash;&mdash;&gt; trainer</div>
+<div class="line">generator &lt;&mdash;&mdash;new weights&mdash;&mdash;&mdash;&mdash;&mdash;&mdash;&mdash;&mdash; trainer</div>
+</div>
+<p style="margin-top:8px">The reason to do this is on tab 0: give the KV cache <strong>the full VRAM budget of its own node</strong> instead of the leftovers. Generation throughput rises, and you can scale the two pools independently &mdash; more generator replicas if generation dominates, a bigger training mesh if it does not.</p>
+</div>
+
+<div class="card red">
+<h3>But you have just bought a staleness problem</h3>
+<p>Overlap is the point, and overlap is exactly what breaks on-policyness. If the generator is producing while the trainer is stepping, then by the time a rollout is consumed the weights have moved:</p>
+<div class="math">
+<div class="line">rollout produced by  &theta;<sub>t</sub></div>
+<div class="line">consumed to update   &theta;<sub>t+k</sub>     <span class="cmt">// k = how far the pools have drifted</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">k = 0  &rarr; strictly on-policy, but no overlap (that's tab 1)</div>
+<div class="line">k = 1  &rarr; one step stale; usually fine</div>
+<div class="line">k large &rarr; the ratio in ch. 5's loss is doing heavy lifting, and</div>
+<div class="line">          eventually the clip is active on everything and learning stalls</div>
+</div>
+<p style="margin-top:6px">So <code>k</code> is the real design dial, and chapter 9&#x2019;s on/off-policy spectrum is the theory for it. The importance ratio and clip you learned in chapter 5 are precisely what make <code>k &gt; 0</code> survivable at all.</p>
+</div>
+
+<div class="card orange">
+<h3>And weight sync is now a real line item</h3>
+<div class="math">
+<div class="line">8B model, bf16 weights = <span class="val">15 GB</span> to push to every generator replica,</div>
+<div class="line">every time you want them refreshed.</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Hence the temptation, and the trap:</span></div>
+<div class="line">sync less often &rarr; cheaper &rarr; but k grows &rarr; more staleness</div>
+</div>
+<p style="margin-top:6px">This is the trade in one line: <strong>you are exchanging on-policyness for GPU utilization,</strong> and the exchange rate is how often you can afford to broadcast weights.</p>
+</div>
+
+<div class="card purple">
+<h3>Choosing between the two</h3>
+<div class="scroll"><table>
+<tr><th></th><th>colocated</th><th>disaggregated</th></tr>
+<tr><td>KV cache budget</td><td>leftovers</td><td style="color:#4caf50">the whole node</td></tr>
+<tr><td>overlap</td><td>none</td><td style="color:#4caf50">yes</td></tr>
+<tr><td>weight sync</td><td style="color:#4caf50">local, ~free</td><td>network broadcast</td></tr>
+<tr><td>staleness</td><td style="color:#4caf50">none</td><td>k &gt; 0, must be managed</td></tr>
+<tr><td>complexity</td><td style="color:#4caf50">low</td><td>high</td></tr>
+<tr><td>use it when</td><td>short-to-medium responses; one node; you want simple and correct</td><td>long reasoning traces; many nodes; generation clearly dominates wall-clock</td></tr>
+</table></div>
+<p style="margin-top:8px">The honest summary of what people do: <strong>start colocated.</strong> Move to disaggregated when the profile says generation is eating your run and the KV squeeze is why.</p>
+</div>
+
+<button class="nx" onclick="go(4)">Next: where does the teacher go? &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 3 ============================ -->
+<div class="page" data-t="4. The Teacher">
+<h2>Where the Teacher Sits (and Why It Is the Easy One)</h2>
+
+<div class="card green">
+<h3>A third pool is usually unnecessary</h3>
+<p>For on-policy distillation (<a href="11_on_policy_distillation.html" style="color:#4fc3f7">ch. 11</a>) there is a third model. It sounds like a third pool. It usually is not, because of what the teacher <em>does not</em> need:</p>
+<div class="scroll"><table>
+<tr><th>role</th><th>needs</th><th>bytes/param</th><th>8B model</th></tr>
+<tr><td>student (training)</td><td>weights + grads + Adam</td><td>16</td><td>119 GB</td></tr>
+<tr><td>student (generating)</td><td>weights + KV cache</td><td>2 + KV</td><td>15 GB + KV</td></tr>
+<tr><td><strong>teacher (scoring)</strong></td><td>weights only</td><td style="color:#4caf50"><strong>2</strong></td><td style="color:#4caf50"><strong>15 GB</strong></td></tr>
+</table></div>
+<p style="margin-top:8px">The teacher never generates, never backprops, and holds no optimizer state. It also does exactly <strong>one forward pass</strong> per batch, over text that already exists. So it is cheap in both memory and time, and it typically just co-resides with the trainer.</p>
+</div>
+
+<div class="card blue">
+<h3>The phase diagram for distillation</h3>
+<div class="math">
+<div class="line"><span class="cmt">// colocated variant — the common case</span></div>
+<div class="line">phase 1  STUDENT generates      &rarr; KV cache active, optimizer offloaded</div>
+<div class="line">phase 2  TEACHER scores         &rarr; one forward pass over the student's text</div>
+<div class="line">phase 3  STUDENT updates        &rarr; KV released, optimizer resident</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Note phase 2 is short. The teacher is not the bottleneck —</span></div>
+<div class="line">// phase 1 is, as always.</div>
+</div>
+<p style="margin-top:8px">One thing worth knowing: since the teacher is larger than the student, its 2 bytes/param can still be the biggest single weight tensor in the job. A 70B teacher is 140 GB in bf16 &mdash; more than the 8B student's entire training state. So for a big teacher you do shard it, or serve it from its own replicas, purely because of weight size rather than because scoring is expensive.</p>
+</div>
+
+<div class="card orange">
+<h3>Which model is expensive to run, and the pleasant surprise</h3>
+<p>In classic off-policy distillation the <em>teacher</em> generates &mdash; and generation is the expensive operation, so you pay decode cost at the big model&#x2019;s price. On-policy distillation reverses the roles:</p>
+<div class="scroll"><table>
+<tr><th></th><th>who generates (expensive)</th><th>who forward-passes (cheap)</th></tr>
+<tr><td>off-policy distillation</td><td style="color:#ef5350">teacher &mdash; the big model</td><td>student</td></tr>
+<tr><td>on-policy distillation</td><td style="color:#4caf50">student &mdash; the small model</td><td>teacher</td></tr>
+</table></div>
+<p style="margin-top:6px">So you decode at the cheap model&#x2019;s price and only <em>score</em> at the expensive model&#x2019;s price. That is a real part of why the reported Qwen3 comparison lands at 1,800 GPU-hours against RL&#x2019;s 17,920 &mdash; and it is separate from the dense-signal argument in ch. 11.</p>
+</div>
+
+<button class="nx" onclick="go(5)">Next: the cadence spectrum &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 4 ============================ -->
+<div class="page" data-t="5. Cadence">
+<h2>How Often Do You Update, and How Stale Is Your Data?</h2>
+
+<div class="card blue">
+<h3>The question underneath: after you update, must you re-generate?</h3>
+<p><strong>Yes.</strong> That is what on-policy means, and it is the constraint the entire chapter dances around:</p>
+<div class="math">
+<div class="line">generate with &theta;<sub>t</sub>  &rarr;  score  &rarr;  update to &theta;<sub>t+1</sub>  &rarr;  <span class="key">data is now stale</span></div>
+</div>
+<p style="margin-top:6px">In the strict version it is <strong>one generation round per update</strong> and the data is single-use. Everything below is a way of relaxing that to keep GPUs busy &mdash; and each rung spends a little more on-policyness.</p>
+</div>
+
+<div class="card green">
+<h3>One GRPO step, traced &mdash; the same skeleton as ch. 11's distillation step</h3>
+<p>Concretely, with DAPO's reported configuration (512 prompts &times; 16 samples):</p>
+<div class="math">
+<div class="line"><span class="cmt">// ---- 1. GENERATE (policy, on the inference engine) ----</span></div>
+<div class="line">responses = policy.generate(512 prompts, G=16)   <span class="cmt">// 8,192 sequences</span></div>
+<div class="line">old_log_probs                                    <span class="cmt">// saved by the GENERATOR</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// ---- 2. SCORE ----</span></div>
+<div class="line">reward = verifier(responses)      <span class="cmt">// CPU code — 1.0 or 0.0 per response</span></div>
+<div class="line">adv    = (reward &minus; group_mean) / group_std      <span class="cmt">// ch. 7, one per RESPONSE</span></div>
+<div class="line">adv    = broadcast(adv)                          <span class="cmt">// same number onto every token</span></div>
+<div class="line">ref_log_probs = reference(responses)   <span class="cmt">// extra forward pass — ONLY if KL kept</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// ---- 3. UPDATE (repeat for a few inner epochs) ----</span></div>
+<div class="line"><span class="kw">for</span> epoch <span class="kw">in</span> range(few):</div>
+<div class="line">    new_log_probs = policy(responses)            <span class="cmt">// TRAINER's forward</span></div>
+<div class="line">    ratio = exp(new_log_probs &minus; old_log_probs)</div>
+<div class="line">    loss  = clipped_loss(ratio, adv)</div>
+<div class="line">    loss.backward(); opt.step()</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// then throw the batch away and generate again with the new weights.</span></div>
+</div>
+<p style="margin-top:8px">Compare it to <a href="11_on_policy_distillation.html" style="color:#4fc3f7">ch. 11 tab 5</a>'s distillation step and the skeleton is identical &mdash; generate, score, update. Only step 2 differs:</p>
+<div class="scroll"><table>
+<tr><th>step 2 does what</th><th>GRPO / DAPO</th><th>on-policy distillation</th></tr>
+<tr><td>grader</td><td>verifier (code) &mdash; or an RM in RLHF</td><td>teacher forward pass</td></tr>
+<tr><td>signal granularity</td><td>one scalar per response, then broadcast</td><td>one number per token, natively</td></tr>
+<tr><td>needs group statistics?</td><td>yes &mdash; mean and std over G samples</td><td>no</td></tr>
+<tr><td>extra frozen forward</td><td>reference, if KL is kept</td><td>teacher (that IS the signal)</td></tr>
+</table></div>
+<p style="margin-top:6px">And note where PPO differs from both: its critic is <em>trained</em>, so step 3 also runs a forward <em>and</em> backward through a second model, and step 2 needs the critic's value predictions before the advantage exists at all.</p>
+</div>
+
+<div class="card">
+<h3>The spectrum, strictest first</h3>
+<div class="scroll"><table>
+<tr><th>rung</th><th>what you do</th><th>staleness</th><th>what pays for it</th></tr>
+<tr><td>1. fully synchronous</td><td>generate a batch, one optimizer step, discard</td><td style="color:#4caf50">none</td><td>&mdash;</td></tr>
+<tr><td>2. inner epochs</td><td>generate once, take several steps on that batch</td><td>grows within the batch</td><td>ch. 5's ratio + clip</td></tr>
+<tr><td>3. async pipeline</td><td>generator and trainer run concurrently; weights lag by k</td><td>k steps</td><td>ratio + clip, and syncing often enough</td></tr>
+<tr><td>4. partial rollouts</td><td>park unfinished long sequences, resume next iteration</td><td>a sequence spans weight versions</td><td>same, plus tolerance for mixed-vintage tokens</td></tr>
+</table></div>
+<p style="margin-top:8px">Rung 2 is worth pausing on, because <span class="key">you already studied it as pure theory.</span> Chapter 5 page 1 asks "can we reuse this batch for several updates?" and answers it with the ratio and the clip. That is not an abstract exercise &mdash; it is the mechanism that lets rung 2 exist, and rung 2 is why RL frameworks have an "inner epochs" setting at all.</p>
+</div>
+
+<div class="card red">
+<h3>The waiting problem nobody warns you about: stragglers inside one batch</h3>
+<p>Generator-vs-trainer imbalance is the obvious wait. This is the one that actually hurts:</p>
+<div class="math">
+<div class="line">256 sequences in flight. Length distribution is very skewed:</div>
+<div class="line">&nbsp;</div>
+<div class="line">  most finish around      ~500 tokens</div>
+<div class="line">  a few run to the cap    <span class="val">20,480</span> tokens</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// A synchronous batch is not done until the LAST sequence is done.</span></div>
+<div class="line">// So 255 sequences sit finished while one keeps decoding —</div>
+<div class="line">// and decode is sequential, so that tail is ~40x the median length.</div>
+</div>
+<p style="margin-top:8px">Fixes, all of which you have now met: continuous batching (the engine backfills finished slots with new prompts), <strong>partial rollouts</strong> (rung 4 &mdash; park and resume, Kimi k1.5), and simply capping length &mdash; which brings back ch. 15&#x2019;s truncation problem and its overlong reward shaping. <a href="13_production_atlas.html" style="color:#4fc3f7">Chapter 13</a> lists this as its own failure mode.</p>
+</div>
+
+<button class="nx" onclick="go(6)">Next: failure modes and review questions &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 5 ============================ -->
+<div class="page" data-t="6. What Breaks">
+<h2>The Failure You Cannot See From the Math</h2>
+
+<div class="card red">
+<h3>Engine mismatch: your data is off-policy even when the weights are identical</h3>
+<p>This is the one that surprises people, and it is a direct consequence of having two different pieces of software run the same model.</p>
+<div class="math">
+<div class="line">The generator (vLLM/SGLang) computed log p = &minus;2.30 for this token.</div>
+<div class="line">The trainer, <span class="key">at the very same weights</span>, computes  &minus;2.28.</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Why: different kernels, different batching, different reduction</span></div>
+<div class="line">// order, different precision. Both are "correct" implementations.</div>
+<div class="line">&nbsp;</div>
+<div class="line">But old_log_probs came from the GENERATOR, and new_log_probs from</div>
+<div class="line">the TRAINER — so ratio = exp(new &minus; old) is wrong for a reason that</div>
+<div class="line">has nothing to do with the policy having changed.</div>
+</div>
+<p style="margin-top:8px">So "on-policy" is quietly off-policy by a small, systematic amount that no amount of synchronization removes. And it is <strong>much worse for MoE models</strong>, where a tiny numeric difference flips a router and sends the token through entirely different experts &mdash; <a href="12_moe_train_serve_gap.html" style="color:#4fc3f7">chapter 12</a> has the measured numbers (~10% of routers flip, affecting ~94% of tokens; KL 1.5e-3 vs 6.4e-4 for dense).</p>
+<p style="margin-top:6px">Fixes: importance-correct for the gap explicitly (TIS), match precision between the two engines (the FP16 result), or recompute <code>old_log_probs</code> with the <em>trainer</em> so both sides of the ratio come from the same implementation &mdash; which costs an extra forward pass but removes the mismatch by construction.</p>
+</div>
+
+<div class="card orange">
+<h3>The three-line summary of the whole chapter</h3>
+<div class="math">
+<div class="line">1. KV cache, not optimizer state, is what makes this hard.</div>
+<div class="line">2. Colocated is the default; disaggregate when generation dominates.</div>
+<div class="line">3. Every trick that keeps GPUs busy spends on-policyness — and</div>
+<div class="line">   ch. 5's ratio and clip are what you spend it with.</div>
+</div>
+</div>
+
+<div class="card purple">
+<h3>Review questions</h3>
+<div class="scroll"><table>
+<tr><th style="width:40%">Question</th><th>One-line answer</th></tr>
+<tr><td>"Can't you just use the training GPUs to generate?"</td><td>Yes &mdash; that is the standard default (verl's HybridEngine). You time-slice: offload the optimizer during generation so the KV cache gets the memory, release the KV cache during training.</td></tr>
+<tr><td>"Then why would anyone use separate pools?"</td><td>KV cache. At 20k-token reasoning traces the cache for a 256-sequence batch is ~640 GB &mdash; 5&times; the training state &mdash; so sharing means starving it, and generation is already the bottleneck.</td></tr>
+<tr><td>"Why is training 8&times; the memory of inference?"</td><td>16 bytes/param (bf16 weights + fp32 master + Adam m and v + gradient) versus 2 for bf16 weights alone.</td></tr>
+<tr><td>"After an update, can you reuse the old rollouts?"</td><td>Not for free &mdash; they are now off-policy. PPO's ratio and clip are exactly the licence to do it for a few inner epochs.</td></tr>
+<tr><td>"What is staleness and what controls it?"</td><td>The gap k between the weights that generated a rollout and the weights being updated. Overlap increases k; syncing weights more often decreases it, at the cost of broadcasting ~15 GB per sync for an 8B model.</td></tr>
+<tr><td>"Where does the teacher live in on-policy distillation?"</td><td>Usually co-resident with the trainer &mdash; forward-only, so 2 bytes/param and no optimizer state, doing one forward pass per batch. Shard it only if the teacher is large.</td></tr>
+<tr><td>"What is the biggest source of idle GPU time?"</td><td>Stragglers within a batch: a synchronous step waits for the longest sequence, and the tail can be ~40&times; the median. Fixed by continuous batching or partial rollouts.</td></tr>
+<tr><td>"How can on-policy data still be off-policy?"</td><td>Engine mismatch &mdash; the inference engine and the trainer compute slightly different log-probs at identical weights, so the ratio is wrong independent of drift. Worst on MoE, where routers flip.</td></tr>
+<tr><td>"You have one node and 2k-token responses. What layout?"</td><td>Colocated, synchronous, no question &mdash; the KV cache is ~8 GB, complexity buys you nothing.</td></tr>
+</table></div>
+</div>
+
+<div class="card green">
+<h3>Where this sits</h3>
+<p>This chapter is the <em>machine</em>; the others are the <em>math</em>. The direct dependencies:</p>
+<div class="scroll"><table>
+<tr><th>from here</th><th>go to</th></tr>
+<tr><td>why staleness is survivable at all</td><td><a href="5_ppo.html" style="color:#4fc3f7">ch. 5</a> &mdash; the ratio and the clip</td></tr>
+<tr><td>how off-policy is "too" off-policy</td><td><a href="9_on_off_policy.html" style="color:#4fc3f7">ch. 9</a> &mdash; the spectrum</td></tr>
+<tr><td>the engine mismatch in depth, with numbers</td><td><a href="12_moe_train_serve_gap.html" style="color:#4fc3f7">ch. 12</a></td></tr>
+<tr><td>stragglers, truncation, and eight other failure modes</td><td><a href="13_production_atlas.html" style="color:#4fc3f7">ch. 13</a></td></tr>
+<tr><td>the distillation loop this layout serves</td><td><a href="11_on_policy_distillation.html" style="color:#4fc3f7">ch. 11 tab 5</a></td></tr>
+</table></div>
+</div>
+
+<div class="card">
+<h3>Sources</h3>
+<p style="font-size:.88em">Colocated-vs-disaggregated framing and the <code>vllm_gpu_memory_utilization</code> / KV-budget advice follow verl's HybridEngine design (HybridFlow, <a href="https://arxiv.org/abs/2409.19256" style="color:#4fc3f7">arXiv:2409.19256</a>); OpenRLHF and TRL support both layouts. The MoE engine-mismatch numbers are ch. 12's sources. Every memory figure on tab 0 is computed from the stated model geometry &mdash; 8B parameters, 16 bytes/param for mixed-precision AdamW, and Llama-3-8B's 32 layers / 8 KV heads / head_dim 128 at bf16 &mdash; and is reproducible by hand.</p>
+</div>
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page');const nav=document.getElementById('nav');
+pages.forEach((p,i)=>{const b=document.createElement('button');b.textContent=p.dataset.t;b.onclick=()=>go(i);if(i===0)b.classList.add('on');nav.appendChild(b);});
+function go(n){pages.forEach((p,i)=>p.classList.toggle('on',i===n));nav.querySelectorAll('button').forEach((b,i)=>{b.classList.remove('on');if(i<n)b.classList.add('done');else b.classList.remove('done');if(i===n)b.classList.add('on');});window.scrollTo({top:0,behavior:'smooth'});}
+</script>
+</body>
+</html>

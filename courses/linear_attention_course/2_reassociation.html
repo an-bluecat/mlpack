@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>2. Change the rule, then move the parentheses | Linear attention</title><link rel="stylesheet" href="course.css"><script src="course.js" defer></script></head>
+<body><main class="shell"><nav class="crumb" aria-label="Breadcrumb"><a href="../index.html">All ML courses</a><a href="index.html">Linear attention course</a></nav>
+<header><h1>2. Change the rule, then move the parentheses</h1><p class="sub">One three-token example proves what is preserved and what is changed.</p></header><div class="nav" role="tablist" aria-label="Lesson sections"><button type="button" id="tab-0" role="tab" aria-controls="page-0" aria-selected="true" tabindex="0">1. Softmax blocks the shortcut</button><button type="button" id="tab-1" role="tab" aria-controls="page-1" aria-selected="false" tabindex="-1">2. All pairs with numbers</button><button type="button" id="tab-2" role="tab" aria-controls="page-2" aria-selected="false" tabindex="-1">3. The small summary</button><button type="button" id="tab-3" role="tab" aria-controls="page-3" aria-selected="false" tabindex="-1">4. Exactly what is equal?</button></div><section id="page-0" role="tabpanel" aria-labelledby="tab-0"><h2>Softmax blocks the shortcut</h2><div class="card orange"><h3>The tempting move that fails</h3><div class="math">softmax(Q @ K.T / sqrt(Dk)) @ V
+
+≠ Q @ (K.T @ V)</div><p>Associativity rearranges matrix multiplication. It cannot move a nonlinear softmax through a product. We first choose a new similarity that factors into mapped query/key vectors.</p></div><div class="card "><h3>A normalized positive dot product</h3><div class="math">u_i = φ(q_i)       a_j = φ(k_j)
+w_ij = u_i · a_j
+y_i = Σ_j (w_ij v_j) / Σ_j w_ij</div><p>The numerator accumulates payloads; the denominator turns their nonnegative weights into an average. A “kernel” here means the similarity function κ(q,k)=φ(q)·φ(k). It is unrelated to a GPU program also called a kernel.</p></div><details class="more"><summary>Refresher: is ELU+1 secretly an approximation of softmax?</summary><div><p>It defines a different kernel. Performer designs random features to approximate the exponential similarity used by softmax; ELU+1 by itself has no such equality or approximation guarantee.</p></div></details><button type="button" class="next-tab" data-next="page-1">Next: All pairs with numbers</button></section><section id="page-1" role="tabpanel" aria-labelledby="tab-1" hidden><h2>All pairs with numbers</h2><div class="card blue"><h3>Define every input</h3><div class="math">raw Q = raw K = [[0,0], [0,1], [1,0]]
+φ(Q) = φ(K) = [[1,1], [1,2], [2,1]]
+V = [[2,0], [0,4], [6,2]]</div><p>There are three tokens and two features. Q and K are equal only to simplify this example. We will derive ELU+1 in lesson 3; for now use the mapped vectors shown.</p></div><p class="output-label">Output — real CPU run, float64, PyTorch 2.8.0</p><pre class="output">W = φ(Q) @ φ(K).T
+[2, 3, 3]
+[3, 5, 4]
+[3, 4, 5]
+
+row totals = [8, 12, 12]
+normalized W @ V
+[2.75, 2.25]
+[2.5, 2.333333]
+[3, 2.166667]</pre><div class="card "><h3>Trace the second output</h3><div class="math">q₂ features = [1,2]
+weights = [1,2] · each key = [3,5,4]
+numerator = 3[2,0] + 5[0,4] + 4[6,2] = [30,28]
+denominator = 3+5+4 = 12
+y₂ = [30,28]/12 = [2.5, 2.333333…]</div><p>Each token here can read all three values. This is bidirectional attention; it is not yet a causal language-model layer.</p></div><button type="button" class="next-tab" data-next="page-2">Next: The small summary</button></section><section id="page-2" role="tabpanel" aria-labelledby="tab-2" hidden><h2>The small summary</h2><figure>
+<svg class="diagram-wide" viewBox="0 0 760 286" role="img" aria-label="Two multiplication orders. All pairs makes a T by T table; summarizing keys and values makes an M by Dv state.">
+<defs><marker id="shape-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="#4fc3f7"/></marker></defs>
+<text x="20" y="25" fill="#ffb74d">All token pairs</text>
+<rect x="20" y="42" width="150" height="72" rx="8" fill="#12122a" stroke="#2a2a4a"/><text x="42" y="70">Qf @ Kfᵀ</text><text x="42" y="96">(T,M) @ (M,T)</text>
+<path d="M180 78 H238" stroke="#4fc3f7" fill="none" marker-end="url(#shape-arrow)"/>
+<rect x="250" y="42" width="180" height="72" rx="8" fill="#1a1400" stroke="#ff9800"/><text x="270" y="70">W: T × T</text><text x="270" y="96">one entry per pair</text>
+<path d="M440 78 H498" stroke="#4fc3f7" fill="none" marker-end="url(#shape-arrow)"/>
+<rect x="510" y="42" width="225" height="72" rx="8" fill="#12122a" stroke="#2a2a4a"/><text x="532" y="70">W @ V</text><text x="532" y="96">then divide by row mass</text>
+<text x="20" y="165" fill="#81c784">Accumulate once, then read</text>
+<rect x="20" y="182" width="150" height="72" rx="8" fill="#12122a" stroke="#2a2a4a"/><text x="42" y="210">Kfᵀ @ V</text><text x="42" y="236">(M,T) @ (T,Dv)</text>
+<path d="M180 218 H238" stroke="#4fc3f7" fill="none" marker-end="url(#shape-arrow)"/>
+<rect x="250" y="182" width="180" height="72" rx="8" fill="#0a1a0a" stroke="#4caf50"/><text x="270" y="210">S: M × Dv</text><text x="270" y="236">no token-pair axis</text>
+<path d="M440 218 H498" stroke="#4fc3f7" fill="none" marker-end="url(#shape-arrow)"/>
+<rect x="510" y="182" width="225" height="72" rx="8" fill="#12122a" stroke="#2a2a4a"/><text x="532" y="210">Qf @ S</text><text x="532" y="236">then divide by Qf @ z</text>
+</svg>
+<svg class="diagram-narrow" viewBox="0 0 310 320" role="img" aria-label="All pairs builds T by T weights. Reassociation builds only M by Dv state.">
+<text x="10" y="25">All pairs</text><rect x="10" y="40" width="290" height="95" rx="8" fill="#12122a" stroke="#ff9800"/>
+<text x="25" y="68">Qf @ Kfᵀ → W (T,T)</text><text x="25" y="96">W @ V / row mass</text><text x="25" y="122">Intermediate grows with T²</text>
+<text x="10" y="182">Summarize, then read</text><rect x="10" y="197" width="290" height="110" rx="8" fill="#12122a" stroke="#4caf50"/>
+<text x="25" y="225">Kfᵀ @ V → S (M,Dv)</text><text x="25" y="253">(Qf @ S) / (Qf @ z)</text><text x="25" y="282">State has no time axis</text></svg>
+<figcaption>Both lanes compute the same normalized feature-map attention. Neither lane here is softmax attention.</figcaption></figure><div class="card green"><h3>Build S and z once</h3><div class="math">S = φ(K).T @ V     shape (M,Dv)
+z = Σ_j φ(k_j)     shape (M,)
+
+numerator = φ(Q) @ S
+denominator = φ(Q) @ z
+output = numerator / denominator[:,None]</div><p>Expand one entry: S[0,0] = 1×2 + 1×0 + 2×6 = 14. The time axis has been summed out. Every query can now read this table instead of visiting every token.</p></div><p class="output-label">Output — real CPU run, float64, PyTorch 2.8.0</p><pre class="output">S
+[14, 8]
+[8, 10]
+z = [4,4]
+
+query 2: [1,2] @ S = [30,28]
+query 2 mass: [1,2] · [4,4] = 12
+output = [2.5, 2.333333…]</pre><details class="more"><summary>Refresher: why is that denominator the same?</summary><div><div class="math">Σ_j (u_i · a_j)
+= u_i · (Σ_j a_j)
+= u_i · z</div><p>The query is fixed while summing over keys. Distributivity lets it leave the sum. The numerator uses the same move, with each key multiplied by its value.</p></div></details><button type="button" class="next-tab" data-next="page-3">Next: Exactly what is equal?</button></section><section id="page-3" role="tabpanel" aria-labelledby="tab-3" hidden><h2>Exactly what is equal?</h2><div class="table-wrap"><table><thead><tr><th scope="col">Compare</th><th scope="col">Same output?</th></tr></thead><tbody><tr><td>Dense ELU+1 kernel vs reassociated ELU+1 kernel</td><td>Yes, apart from floating-point order effects; use the same numerical floor.</td></tr><tr><td>ELU+1 kernel vs scaled softmax</td><td>Generally no.</td></tr><tr><td>Causal recurrence vs full bidirectional summary</td><td>No: the set of available keys differs.</td></tr></tbody></table></div><p class="output-label">Output — real CPU run, float64, PyTorch 2.8.0</p><pre class="output">softmax(Q @ K.T / sqrt(2)) @ V
+[2.666667, 2]
+[1.986041, 2.51047]
+[3.517449, 2]
+
+ELU+1 kernel output
+[2.75, 2.25]
+[2.5, 2.333333]
+[3, 2.166667]</pre><div class="card purple"><h3>Check yourself</h3><p>Without forming W, calculate the first output using u=[1,1], S and z above.</p><details class="more"><summary>Show the reasoning</summary><div><p>uS = [22,18]; uz = 8; output = [2.75,2.25]. This matches the first row of the dense reference. The equality is about the chosen kernel, not about softmax.</p></div></details></div><div class="card "><h3>Exercise</h3><p>Make all three values [7,−2]. Predict the output before running it. Then remove the denominator and repeat a key/value pair. Explain why the unnormalized result grows but the normalized average does not.</p></div></section><nav class="chapter-links" aria-label="Between lessons"><a href="1_cost.html">Previous: 1. Where the quadratic cost comes from</a><a href="3_features.html">Next: 3. Why ELU+1 and a denominator?</a></nav><div class="sources">Sources: <a href="https://proceedings.mlr.press/v119/katharopoulos20a.html">Katharopoulos et al. (2020), Transformers are RNNs</a>; <a href="https://arxiv.org/abs/2009.14794">Choromanski et al., Rethinking Attention with Performers</a>.<p>Numeric examples are computed by <a href="lab.py">lab.py</a>; <a href="verified_results.json">captured results</a>. Rebuild sources: scripts/build_linear_attention_course.py.</p></div></main></body></html>

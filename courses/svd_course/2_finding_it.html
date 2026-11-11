@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SVD Ch2: Where U, S and V come from</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em;max-width:780px;margin-left:auto;margin-right:auto}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:880px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+a.nx{display:inline-block;padding:10px 24px;background:#4caf50;color:#000;border-radius:8px;font-weight:700;font-size:.9em;margin-top:14px;text-decoration:none}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 10px;border:1px solid #333;text-align:left;font-size:.84em}
+th{background:#1a1a3a;color:#4fc3f7}
+.scroll{overflow-x:auto}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',Consolas,monospace;font-size:.84em;line-height:1.8;overflow-x:auto}
+.math .line{margin:2px 0;display:block;white-space:pre}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.math .kw{color:#c586c0}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math.out{border-left:3px solid #4caf50;background:#0d1a12}
+.outlabel{display:block;font-size:.72em;color:#4caf50;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.key{color:#ffb74d;font-weight:600}
+.inline{font-family:'Fira Code',Consolas,monospace;background:#1a1a2e;border:1px solid #333;border-radius:4px;padding:1px 6px;font-size:.86em;color:#9cdcfe}
+a{color:#4fc3f7}
+ul{margin-left:20px;margin-top:6px}li{margin:4px 0}
+details{margin-top:12px}
+details summary{cursor:pointer;color:#888;font-size:.85em;padding:8px 12px;background:#12122a;border:1px solid #333;border-radius:8px}
+details summary:hover{color:#ccc;border-color:#555}
+details[open] summary{color:#4fc3f7;border-color:#4fc3f7}
+details .card{margin-top:10px}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+
+<h1>SVD Chapter 2: Where U, S and V Come From</h1>
+<p class="sub">Chapter 1 found the ellipse by sampling angles &mdash; a demo, not a method. This chapter turns "the longest axis" into an equation, watches M&#7488;M fall out of it, and computes the entire SVD of our 2&times;2 by hand, with numpy only as the referee.</p>
+
+<div class="nav" id="nav"></div>
+
+<!-- PAGE 0 -->
+<div class="page on" data-t="0. One equation each">
+<h2>From "M v&#7522; = &sigma;&#7522; u&#7522;" to a factorization &mdash; by stacking</h2>
+
+<div class="card blue">
+<h3>Two equations, side by side</h3>
+<p>Chapter 1 ended with one equation per direction. Write both out:</p>
+<div class="math">
+<span class="line">M &middot; v&#8321; = &sigma;&#8321; u&#8321;            M &middot; v&#8322; = &sigma;&#8322; u&#8322;</span>
+</div>
+<p>Two separate statements. Now the only trick in this chapter: <span class="key">a matrix times a stack of columns is the stack of the individual results.</span> That is simply how matrix multiplication works &mdash; column j of <span class="inline">M&middot;B</span> is M times column j of B. So glue v&#8321; and v&#8322; together as the columns of one matrix V, and the two equations become one:</p>
+<div class="math">
+<span class="line">M &middot; [ v&#8321; | v&#8322; ]  =  [ &sigma;&#8321;u&#8321; | &sigma;&#8322;u&#8322; ]</span>
+<span class="line">    <span class="cmt">^ call this V</span>          <span class="cmt">^ this is [u&#8321; | u&#8322;] with column j scaled by &sigma;&#7522;</span></span>
+</div>
+<p>And "scale column j by &sigma;&#7522;" is exactly what multiplying on the <em>right</em> by a diagonal matrix does. So the right-hand side is <span class="inline">U&middot;S</span> with <span class="inline">S = diag(&sigma;&#8321;, &sigma;&#8322;)</span>:</p>
+<div class="math">
+<span class="line"><span class="hl">M &middot; V  =  U &middot; S</span></span>
+</div>
+</div>
+
+<div class="card green">
+<h3>One more step: get V off the left-hand side</h3>
+<p>We want M alone. Multiply both sides on the right by V&#8315;&sup1;. Normally that would be work &mdash; but V's columns are <em>perpendicular unit vectors</em>, and for such a matrix the inverse is just the transpose:</p>
+<div class="math">
+<span class="line">V&#7488;V = [ v&#8321;&middot;v&#8321;   v&#8321;&middot;v&#8322; ]  =  [ 1  0 ]  = I     <span class="cmt"># diagonal 1s: unit length</span></span>
+<span class="line">      [ v&#8322;&middot;v&#8321;   v&#8322;&middot;v&#8322; ]     [ 0  1 ]            <span class="cmt"># off-diagonal 0s: perpendicular</span></span>
+<span class="line"></span>
+<span class="line">so   V&#8315;&sup1; = V&#7488;   and   M&middot;V&middot;V&#7488; = U&middot;S&middot;V&#7488;   gives</span>
+<span class="line"></span>
+<span class="line">     <span class="hl">M  =  U &middot; S &middot; V&#7488;</span>     <span class="cmt"># the singular value decomposition</span></span>
+</div>
+<p><span class="key">That is the whole derivation.</span> The famous formula is chapter 1's picture with the two equations stacked into one. Nothing new was assumed &mdash; only that the v's are perpendicular unit vectors, which "the ellipse's axes" already guaranteed.</p>
+<details><summary>Check V&#7488;V = I on our actual numbers</summary>
+<div class="card"><div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  v&#8321;&middot;v&#8321; = (0.7071)&sup2; + (0.7071)&sup2;  = 0.5 + 0.5 = <span class="val">1</span></span>
+<span class="line">  v&#8322;&middot;v&#8322; = (0.7071)&sup2; + (&minus;0.7071)&sup2; = 0.5 + 0.5 = <span class="val">1</span></span>
+<span class="line">  v&#8321;&middot;v&#8322; = (0.7071)(0.7071) + (0.7071)(&minus;0.7071) = 0.5 &minus; 0.5 = <span class="val">0</span></span>
+</div></div></details>
+</div>
+
+<div class="card orange">
+<h3>Read it right-to-left: three things happen to your vector</h3>
+<p><span class="inline">M&middot;x = U&middot;S&middot;V&#7488;&middot;x</span>, and the rightmost factor acts first:</p>
+<div class="math">
+<span class="line">          <span class="lbl">V&#7488;</span>              <span class="lbl">S</span>               <span class="lbl">U</span></span>
+<span class="line">  x  &rarr;  ROTATE      &rarr;  STRETCH     &rarr;  ROTATE     &rarr;  Mx</span>
+<span class="line">       re-express x     scale axis i    read the result</span>
+<span class="line">       in v-language    by &sigma;&#7522;          out as u-directions</span>
+</div>
+<p>Why does V&#7488; "re-express x"? Because row i of V&#7488; is v&#7522;, so entry i of <span class="inline">V&#7488;x</span> is the dot product <span class="inline">v&#7522;&middot;x</span> &mdash; how much of x points along v&#7522;. Then S scales each of those coordinates by its own &sigma;. Then U places the result back into ordinary coordinates.</p>
+<p><span class="key">Every matrix is a rotation, then an axis-aligned stretch, then another rotation.</span> Shear, reflection, projection &mdash; all secretly this. The SVD's claim is that no matrix does anything more complicated than that.</p>
+</div>
+<button class="nx" onclick="go(1)">Next: but where do &sigma; and v come from? &rarr;</button>
+</div>
+
+<!-- PAGE 1 -->
+<div class="page" data-t="1. Where sigma comes from">
+<h2>Turning "the longest axis" into an equation</h2>
+
+<div class="card">
+<h3>State the goal as an optimization</h3>
+<p>So far we <em>found</em> &sigma;&#8321; by sampling angles &mdash; fine as a demo, useless as a method. Written properly, &sigma;&#8321; is the answer to:</p>
+<div class="math">
+<span class="line">maximize   &#8214;M x&#8214;      subject to   &#8214;x&#8214; = 1</span>
+</div>
+<p>Square roots are awkward, and maximizing a positive quantity is the same as maximizing its square, so use <span class="inline">&#8214;Mx&#8214;&sup2;</span>. Expand it using nothing but the definition <span class="inline">&#8214;y&#8214;&sup2; = y&#7488;y</span>:</p>
+<div class="math">
+<span class="line">&#8214;Mx&#8214;&sup2; = (Mx)&#7488;(Mx) = x&#7488; <span class="hl">M&#7488;M</span> x</span>
+</div>
+<p><span class="key">And there it is.</span> The question "which direction does M stretch most?" has, with no cleverness at all, produced the matrix <span class="inline">M&#7488;M</span>. That single line is the door between the geometry and the arithmetic &mdash; every derivation of the SVD walks through it.</p>
+</div>
+
+<div class="card blue">
+<h3>Why M&#7488;M is a friendly matrix</h3>
+<p>Three properties, each with a one-line reason, because the next page uses all three:</p>
+<div class="scroll"><table>
+<tr><th>property</th><th>why</th><th>what it buys</th></tr>
+<tr><td><strong>square</strong> (n&times;n)</td><td>(n&times;m)(m&times;n)</td><td>eigenvalues are defined at all</td></tr>
+<tr><td><strong>symmetric</strong></td><td>(M&#7488;M)&#7488; = M&#7488;(M&#7488;)&#7488; = M&#7488;M</td><td>its eigenvectors are guaranteed <em>perpendicular</em> &mdash; which is what makes the v's an orthonormal set</td></tr>
+<tr><td><strong>never negative</strong></td><td>x&#7488;M&#7488;Mx = &#8214;Mx&#8214;&sup2; &ge; 0</td><td>eigenvalues &ge; 0, so &radic;&lambda; is real and &sigma; makes sense</td></tr>
+</table></div>
+<p>Contrast M itself: not symmetric here, and its eigenvalues (3 and 5) have <span class="key">nothing</span> to do with the stretches 6.71 and 2.24. Squaring it up first is what tames it.</p>
+</div>
+
+<div class="card green">
+<h3>The link: eigenvectors of M&#7488;M ARE the v's</h3>
+<p>For a symmetric A, maximizing <span class="inline">x&#7488;Ax</span> over unit x is precisely the definition of A's top eigenvector, and the maximum value is its top eigenvalue. With <span class="inline">A = M&#7488;M</span>:</p>
+<div class="math">
+<span class="line">the maximizing x    =  top eigenvector of M&#7488;M  =  <span class="hl">v&#8321;</span></span>
+<span class="line">the maximum &#8214;Mx&#8214;&sup2;  =  top eigenvalue of M&#7488;M   =  <span class="hl">&sigma;&#8321;&sup2;</span>    &rArr;   &sigma;&#8321; = &radic;&lambda;&#8321;</span>
+</div>
+<p>You can also verify it straight from <span class="inline">Mv = &sigma;u</span>, with no eigen-theory at all:</p>
+<div class="math">
+<span class="line">M&#7488;M v = M&#7488;(Mv) = M&#7488;(&sigma;u) = &sigma;&middot;(M&#7488;u) = &sigma;&middot;(&sigma;v) = <span class="hl">&sigma;&sup2; v</span></span>
+<span class="line">                                     <span class="cmt">^ M&#7488;u = &sigma;v, the same statement read backwards</span></span>
+</div>
+<p>That last line <em>is</em> the sentence "v is an eigenvector of M&#7488;M with eigenvalue &sigma;&sup2;." <span class="key">Singular values are square roots of eigenvalues &mdash; of M&#7488;M, never of M.</span></p>
+</div>
+<button class="nx" onclick="go(2)">Next: do it by hand, start to finish &rarr;</button>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page" data-t="2. Full hand computation">
+<h2>The whole SVD of M, computed with a pen</h2>
+
+<div class="card">
+<h3>Step 1 &mdash; build M&#7488;M</h3>
+<div class="math">
+<span class="line">M  = [ 3  0 ]        M&#7488; = [ 3  4 ]</span>
+<span class="line">     [ 4  5 ]              [ 0  5 ]</span>
+<span class="line"></span>
+<span class="line">M&#7488;M's entries are dot products of M's COLUMNS:</span>
+<span class="line">  (1,1): col&#8321;&middot;col&#8321; = 3&middot;3 + 4&middot;4 = <span class="val">25</span></span>
+<span class="line">  (1,2): col&#8321;&middot;col&#8322; = 3&middot;0 + 4&middot;5 = <span class="val">20</span></span>
+<span class="line">  (2,2): col&#8322;&middot;col&#8322; = 0&middot;0 + 5&middot;5 = <span class="val">25</span></span>
+<span class="line"></span>
+<span class="line">M&#7488;M = [ 25  20 ]     <span class="cmt"># symmetric, as promised</span></span>
+<span class="line">       [ 20  25 ]</span>
+</div>
+</div>
+
+<div class="card blue">
+<h3>Step 2 &mdash; its eigenvalues</h3>
+<p>Solve <span class="inline">det(M&#7488;M &minus; &lambda;I) = 0</span>:</p>
+<div class="math">
+<span class="line">det [ 25&minus;&lambda;   20   ]  =  (25&minus;&lambda;)&sup2; &minus; 400  =  0</span>
+<span class="line">    [ 20    25&minus;&lambda; ]</span>
+<span class="line"></span>
+<span class="line">(25&minus;&lambda;)&sup2; = 400  &rArr;  25&minus;&lambda; = &plusmn;20  &rArr;  <span class="hl">&lambda; = 45  or  &lambda; = 5</span></span>
+</div>
+<div class="math out"><span class="outlabel">output &mdash; real run: numpy eigenvalues of M&#7488;M</span>
+<span class="line">  [45.  5.]        <span class="cmt"># matches the hand solve</span></span>
+</div>
+<p>Square roots, largest first:</p>
+<div class="math">
+<span class="line">&sigma;&#8321; = &radic;45 = 3&radic;5 = <span class="hl">6.7082</span>          &sigma;&#8322; = &radic;5 = <span class="hl">2.2361</span></span>
+</div>
+<p>Exactly the two lengths chapter 1 measured off the ellipse by brute force. <span class="key">Same numbers, now from a formula instead of a sweep.</span></p>
+</div>
+
+<div class="card orange">
+<h3>Step 3 &mdash; the eigenvectors give V</h3>
+<p>For each &lambda;, solve <span class="inline">(M&#7488;M &minus; &lambda;I)v = 0</span> &mdash; one line each:</p>
+<div class="math">
+<span class="line"><span class="lbl">&lambda; = 45:</span>  (25&minus;45)a + 20b = 0  &rarr;  &minus;20a + 20b = 0  &rarr;  a = b</span>
+<span class="line">           direction [1, 1], normalized:  <span class="hl">v&#8321; = [1, 1]/&radic;2 = [0.7071, 0.7071]</span></span>
+<span class="line"></span>
+<span class="line"><span class="lbl">&lambda; = 5:</span>   (25&minus;5)a + 20b = 0   &rarr;   20a + 20b = 0  &rarr;  a = &minus;b</span>
+<span class="line">           direction [1,&minus;1], normalized: <span class="hl">v&#8322; = [1,&minus;1]/&radic;2 = [0.7071, &minus;0.7071]</span></span>
+</div>
+<p>The 45&deg; and &minus;45&deg; directions from chapter 1's sweep &mdash; recovered by algebra rather than by sampling.</p>
+</div>
+
+<div class="card green">
+<h3>Step 4 &mdash; U comes free, from M v = &sigma; u</h3>
+<p>No second eigen-problem needed. Rearranging chapter 1's equation gives <span class="inline">u&#7522; = M v&#7522; / &sigma;&#7522;</span>:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  M&middot;v&#8321; = [2.1213, 6.3640],   |M&middot;v&#8321;| = 6.7082 = &sigma;&#8321;   <span class="cmt"># the length comes out right by itself</span></span>
+<span class="line">  u&#8321; = [2.1213, 6.3640] / 6.7082 = [0.3162, 0.9487] = <span class="hl">[1, 3]/&radic;10</span></span>
+<span class="line"></span>
+<span class="line">  M&middot;v&#8322; = [2.1213, &minus;0.7071],  |M&middot;v&#8322;| = 2.2361 = &sigma;&#8322;</span>
+<span class="line">  u&#8322; = [2.1213, &minus;0.7071] / 2.2361 = [0.9487, &minus;0.3162] = <span class="hl">[3, &minus;1]/&radic;10</span></span>
+<span class="line"></span>
+<span class="line">  u&#8321;&middot;u&#8322; = <span class="val">0.00e+00</span>   <span class="cmt"># perpendicular, without being asked</span></span>
+</div>
+<p>Dividing by &sigma; is what makes u a unit vector; the perpendicularity is inherited from the v's &mdash; you never impose it.</p>
+</div>
+
+<div class="card purple">
+<h3>Step 5 &mdash; reassemble and check</h3>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  U = [ 0.3162   0.9487 ]   S = [ 6.7082   0      ]   V&#7488; = [ 0.7071   0.7071 ]</span>
+<span class="line">      [ 0.9487  &minus;0.3162 ]       [ 0        2.2361 ]        [ 0.7071  &minus;0.7071 ]</span>
+<span class="line"></span>
+<span class="line">  U &middot; S &middot; V&#7488; = [ 3.  0. ]     == M ?  <span class="hl">True</span></span>
+<span class="line">                [ 4.  5. ]</span>
+</div>
+<p>Every number on this page was obtainable with a pen; the run is only the referee.</p>
+<details><summary>numpy prints some signs flipped &mdash; is that a different answer?</summary>
+<div class="card"><p>No. <span class="inline">np.linalg.svd(M)</span> returns U and V&#7488; with both first columns negated relative to ours. That is allowed: flip the sign of <em>both</em> u&#7522; and v&#7522; and the product <span class="inline">&sigma;&#7522; u&#7522; v&#7522;&#7488;</span> is unchanged, so M is reconstructed identically. <span class="key">The SVD is unique only up to these paired sign flips</span> (and up to rotations within any group of equal &sigma;'s). The &sigma;'s themselves are always unique and always &ge; 0 &mdash; those are the numbers you can safely quote. Geometrically: an ellipse's axis is a line, and a line has no preferred arrow direction.</p></div></details>
+</div>
+
+<div class="card">
+<h3>Two free identities to check your work with</h3>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  |det M| = <span class="val">15.0000</span>            &sigma;&#8321; &times; &sigma;&#8322; = 6.7082 &times; 2.2361 = <span class="val">15.0000</span>  <span class="hl">&#10003;</span></span>
+<span class="line">  &#8214;M&#8214;&sup2;<sub>F</sub> = 3&sup2;+0&sup2;+4&sup2;+5&sup2; = <span class="val">50</span>     &sigma;&#8321;&sup2; + &sigma;&#8322;&sup2; = 45 + 5 = <span class="val">50</span>        <span class="hl">&#10003;</span></span>
+</div>
+<p>The first says the determinant &mdash; the area-scaling factor &mdash; is the product of the stretches, which is obvious once you picture a circle of area &pi; becoming an ellipse of area &pi;&sigma;&#8321;&sigma;&#8322;. The second says <span class="key">a matrix's total "size" is split among its singular values</span> &mdash; and the whole of chapter 3 is built on that one.</p>
+</div>
+<a class="nx" href="3_reading_it.html">Chapter 3: reading the numbers &mdash; rank, conditioning, compression &rarr;</a>
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page'),nav=document.getElementById('nav');
+pages.forEach((p,i)=>{const b=document.createElement('button');b.textContent=p.dataset.t;b.onclick=()=>go(i);if(i===0)b.classList.add('on');nav.appendChild(b);});
+function go(n){pages.forEach((p,i)=>p.classList.toggle('on',i===n));nav.querySelectorAll('button').forEach((b,i)=>{b.classList.remove('on');if(i<n)b.classList.add('done');else b.classList.remove('done');if(i===n)b.classList.add('on');});window.scrollTo({top:0,behavior:'smooth'});}
+</script>
+</body>
+</html>

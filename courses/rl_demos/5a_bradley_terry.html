@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Optional Aside: The Bradley-Terry Model — Where −log σ(a−b) Comes From</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em}
+.optional{display:block;text-align:center;margin-bottom:14px}
+.optional span{display:inline-block;background:rgba(206,147,216,.14);color:#ce93d8;border:1px solid rgba(206,147,216,.35);border-radius:5px;font-size:.7em;font-weight:700;padding:2px 10px;text-transform:uppercase;letter-spacing:.08em}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:880px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 12px;border:1px solid #333;text-align:center;font-size:.88em}
+th{background:#1a1a3a;color:#4fc3f7}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',monospace;font-size:.85em;line-height:1.8;overflow-x:auto}
+.math .line{margin:2px 0;white-space:pre}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.key{color:#ffb74d;font-weight:600}
+details.more{background:#12122a;border:1px solid #2a2a4a;border-radius:10px;padding:10px 14px;margin:10px 0}
+details.more summary{cursor:pointer;color:#4fc3f7;font-size:.92em;font-weight:600}
+details.more[open] summary{margin-bottom:8px}
+.scroll{overflow-x:auto}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+<h1>The Bradley-Terry Model</h1>
+<p class="optional"><span>Optional aside &middot; read any time</span></p>
+<p class="sub">Chapters 5, 6 and 14 all use <code>&minus;log sigmoid(a &minus; b)</code> and none of them says where it came from. This is where. Nothing here is required &mdash; but it is the one piece of statistics underneath all three losses.</p>
+<div class="nav" id="nav"></div>
+
+<!-- ============================ PAGE 0 ============================ -->
+<div class="page on" data-t="0. The Problem">
+<h2>Turning "A Beat B" Into Numbers</h2>
+
+<div class="card blue">
+<h3>The setup, and where you have already met it</h3>
+<p>You have a pile of <strong>pairwise results</strong> and nothing else &mdash; no scores, no ratings, just who won:</p>
+<div class="math">
+<div class="line">A beat B      C beat A      B beat D      A beat D   ...</div>
+</div>
+<p style="margin-top:6px">You want <strong>one number per item</strong>, so you can rank them and predict future matchups. That single problem shows up in all of these:</p>
+<div class="scroll"><table>
+<tr><th>Field</th><th>Items</th><th>The number you want</th></tr>
+<tr><td>Chess</td><td>players</td><td>a rating (Elo)</td></tr>
+<tr><td>LLM leaderboards (LMArena)</td><td>models</td><td>the arena score</td></tr>
+<tr><td><a href="5_ppo.html" style="color:#4fc3f7">Ch. 5</a> reward model</td><td>responses to a prompt</td><td>RM(prompt, response)</td></tr>
+<tr><td><a href="6_dpo.html" style="color:#4fc3f7">Ch. 6</a> DPO</td><td>responses to a prompt</td><td>&beta;&middot;log(P_cur/P_ref)</td></tr>
+</table></div>
+</div>
+
+<div class="card red">
+<h3>Why the obvious answer &mdash; win rate &mdash; is broken</h3>
+<p>Just count wins over games played. Now look at two players who both went undefeated:</p>
+<div class="scroll"><table>
+<tr><th>player</th><th>record</th><th>win rate</th></tr>
+<tr><td>Alice</td><td>beat the reigning champion, once</td><td>1/1 = <strong>100%</strong></td></tr>
+<tr><td>Bob</td><td>beat a beginner, nine times</td><td>9/9 = <strong>100%</strong></td></tr>
+</table></div>
+<p style="margin-top:6px">Win rate calls them equal. Obviously they are not. <span class="key">Win rate has no idea who you played.</span> It throws away the single most informative thing in the data &mdash; the strength of your opponent.</p>
+<p style="margin-top:6px">Note this is not a contrived flaw. It is exactly the situation in a preference dataset: a response that beat a strong response has told you much more than one that beat a weak response, and "fraction of comparisons won" cannot see the difference.</p>
+</div>
+
+<div class="card green">
+<h3>What we want instead, stated as a wish</h3>
+<p>A number per item &mdash; call it that item&#x2019;s <strong>strength</strong> &mdash; such that the strengths <em>explain</em> the results we saw. Concretely, we want to be able to say:</p>
+<div class="math">
+<div class="line">"Given these two strengths, the probability that this one wins is ___"</div>
+</div>
+<p style="margin-top:6px">Then "which strengths best explain the data?" becomes a well-posed question with an answer. That is Bradley-Terry: one number per item, plus a rule for turning two numbers into a win probability. The next tab builds the rule.</p>
+</div>
+
+<button class="nx" onclick="go(1)">Next: the rule &mdash; two strengths &rarr; one probability &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 1 ============================ -->
+<div class="page" data-t="1. The Model">
+<h2>The Rule, Built From Scratch</h2>
+
+<div class="card blue">
+<h3>Step 1 — give each item a strength, and let it be any real number</h3>
+<div class="math">
+<div class="line">s(A) = <span class="val">1.0</span>      s(B) = <span class="val">0.0</span>      s(C) = <span class="val">&minus;2.0</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Unbounded on purpose. Negative is fine. There is no natural</span></div>
+<div class="line">// zero and no natural scale &mdash; we will see why on tab 3.</div>
+</div>
+</div>
+
+<div class="card">
+<h3>Step 2 — the naive attempt, and why it fails</h3>
+<p>We need a probability out of two strengths. Simplest idea: share the total in proportion to strength.</p>
+<div class="math">
+<div class="line">P(A beats B) = s(A) / ( s(A) + s(B) )   <span class="cmt">// ?</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Try it with our numbers:</span></div>
+<div class="line">P(A beats C) = 1.0 / ( 1.0 + (&minus;2.0) ) = 1.0 / (&minus;1.0) = <span class="val">&minus;1.0</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// A probability of MINUS ONE. Broken: strengths can be negative</span></div>
+<div class="line">// or sum to zero, and proportions of negatives are nonsense.</div>
+</div>
+</div>
+
+<div class="card green">
+<h3>Step 3 — fix it the way chapter 3 already fixed it: exponentiate first</h3>
+<p>This is the same move as the softmax in ch. 3. To turn unbounded real numbers into positive ones, apply <code>exp</code>, <em>then</em> take proportions:</p>
+<div class="math">
+<div class="line"><span class="hl">P(i beats j) = exp(s_i) / ( exp(s_i) + exp(s_j) )</span>   <span class="cmt">// Bradley-Terry</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// exp of anything is positive, so the ratio is always in (0,1). ✓</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Check the broken case from step 2:</span></div>
+<div class="line">exp(1.0) = 2.718     exp(&minus;2.0) = 0.135</div>
+<div class="line">P(A beats C) = 2.718 / (2.718 + 0.135) = 2.718 / 2.853 = <span class="val">0.953</span> ✓</div>
+</div>
+<p style="margin-top:6px">A is much stronger than C, so a 95% win probability is exactly the sort of answer we wanted.</p>
+</div>
+
+<div class="card purple">
+<h3>Step 4 — and now the identity: that formula IS the sigmoid of the gap</h3>
+<p>This is the step chapters 5 and 6 quietly assume. Do the algebra &mdash; divide top and bottom by <code>exp(s_i)</code>:</p>
+<div class="math">
+<div class="line">        exp(s_i)</div>
+<div class="line">  ───────────────────────</div>
+<div class="line">   exp(s_i) + exp(s_j)</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// divide numerator and denominator by exp(s_i):</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">            1                        1</div>
+<div class="line"> = ─────────────────────  =  ────────────────────</div>
+<div class="line">    1 + exp(s_j)/exp(s_i)      1 + exp(s_j &minus; s_i)</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// and exp(s_j − s_i) = exp( −(s_i − s_j) ), so:</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">            1</div>
+<div class="line"> = ────────────────────────  =  <span class="hl">sigmoid( s_i &minus; s_j )</span></div>
+<div class="line">    1 + exp( &minus;(s_i &minus; s_j) )</div>
+</div>
+<p style="margin-top:8px"><span class="key">Two consequences, and both are facts chapters 5 and 6 state without proof.</span></p>
+<ul style="margin-left:18px;margin-top:4px">
+<li><strong>Only the difference matters.</strong> The formula depends on <code>s_i &minus; s_j</code> and nothing else. Add 100 to every strength and every predicted probability is identical. That is why ch. 5 says "add a constant to every RM score and the loss is unchanged."</li>
+<li><strong>Sigmoid is not a design choice</strong> here &mdash; it is what "share the total in proportion to exp(strength)" <em>equals</em>. It arrives as a consequence, not a decision.</li>
+</ul>
+<div class="scroll"><table>
+<tr><th>gap (s_w &minus; s_l)</th><th>&minus;2</th><th>&minus;1</th><th>0</th><th>+1</th><th>+2</th><th>+2.303</th></tr>
+<tr><td>P(winner wins)</td><td>0.119</td><td>0.269</td><td><strong>0.500</strong></td><td>0.731</td><td>0.881</td><td>0.909</td></tr>
+</table></div>
+<p style="margin-top:6px;font-size:.88em">Read the middle column: <strong>gap 0 means a coin flip</strong> &mdash; "no opinion." That is the same 0.5 that ch. 6 tab 2.1 calls the starting belief, and it is why an untrained model sits there.</p>
+
+<details class="more"><summary>Deeper: where does <code>exp</code> really come from? (the noisy-performance story)</summary>
+<p style="margin-top:8px">Step 3 justified <code>exp</code> as "a trick to make things positive," which is honest but shallow. There is a real story underneath.</p>
+<p style="margin-top:6px">Suppose each item has a fixed strength but performs with random daily variation, and the better performance on the day wins:</p>
+<div class="math">
+<div class="line">performance_i = s_i + noise_i</div>
+<div class="line">i wins  &lt;=&gt;  performance_i &gt; performance_j</div>
+</div>
+<p style="margin-top:6px">If that noise follows the <strong>Gumbel</strong> distribution, then working out <code>P(performance_i &gt; performance_j)</code> gives back <em>exactly</em> <code>exp(s_i)/(exp(s_i)+exp(s_j))</code>. Bradley-Terry is precisely the statement "fixed strengths plus Gumbel noise, highest performance wins."</p>
+<p style="margin-top:6px">This is the same mathematics that makes softmax the right choice for classification, and the same fact behind the "Gumbel-max trick" for sampling. If you use Normal noise instead you get a slightly different curve (that model is called Thurstone / probit) &mdash; it behaves almost identically but has no closed form, which is why Bradley-Terry is the one everybody uses.</p>
+</details>
+</div>
+
+<button class="nx" onclick="go(2)">Next: from the model to the loss &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 2 ============================ -->
+<div class="page" data-t="2. The Loss">
+<h2>Where −log sigmoid(gap) Actually Comes From</h2>
+
+<div class="card blue">
+<h3>Step 1 — the question that defines the loss</h3>
+<p>We have a rule with unknown strengths, and a pile of observed results. The question:</p>
+<div class="math">
+<div class="line">"Which strengths make the results we actually saw the MOST LIKELY?"</div>
+</div>
+<p style="margin-top:6px">That is <strong>maximum likelihood</strong>, and it is the entire derivation. Everything below is bookkeeping on that one sentence.</p>
+</div>
+
+<div class="card">
+<h3>Step 2 — the probability of one observation</h3>
+<p>We observed "w beat l". Under the model, the probability of seeing that is just the rule from tab 1:</p>
+<div class="math">
+<div class="line">P( we see "w beat l" ) = sigmoid( s_w &minus; s_l )</div>
+</div>
+</div>
+
+<div class="card">
+<h3>Step 3 — the probability of ALL observations, and why logs appear</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Assume the comparisons are independent, so multiply:</span></div>
+<div class="line">Likelihood = sigmoid(gap&#8321;) &times; sigmoid(gap&#8322;) &times; ... &times; sigmoid(gap_N)</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// A product of N numbers below 1 underflows fast — with 100k</span></div>
+<div class="line">// comparisons this is astronomically small. Same problem, and same</div>
+<div class="line">// fix, as ch. 6 Step 0: take the log, and the product becomes a sum.</div>
+<div class="line">&nbsp;</div>
+<div class="line">log Likelihood = log sigmoid(gap&#8321;) + log sigmoid(gap&#8322;) + ... </div>
+</div>
+</div>
+
+<div class="card green">
+<h3>Step 4 — flip the sign, because optimizers minimize</h3>
+<div class="math">
+<div class="line"><span class="cmt">// "Maximize log-likelihood" = "minimize NEGATIVE log-likelihood":</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">Loss = &minus; &Sigma;  log sigmoid( s_w &minus; s_l )</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// and for a single pair, that is:</span></div>
+<div class="line"><span class="hl">Loss = &minus;log sigmoid( s_w &minus; s_l )</span></div>
+</div>
+<p style="margin-top:8px"><span class="key">That is the formula.</span> Chapter 5&#x2019;s reward-model loss, chapter 6&#x2019;s DPO loss and chapter 14&#x2019;s SimPO loss are all this single line with different things substituted for <code>s</code>:</p>
+<div class="scroll"><table>
+<tr><th>Where</th><th>what plays the role of s(response)</th></tr>
+<tr><td><a href="5_ppo.html" style="color:#4fc3f7">Ch. 5</a>, reward model</td><td><code>RM(prompt, response)</code> &mdash; a separate network's output</td></tr>
+<tr><td><a href="6_dpo.html" style="color:#4fc3f7">Ch. 6</a>, DPO</td><td><code>&beta; &middot; log( P_cur / P_ref )</code> &mdash; computed from the LLM itself</td></tr>
+<tr><td><a href="14_simpo.html" style="color:#4fc3f7">Ch. 14</a>, SimPO</td><td><code>(&beta;/|y|) &middot; log P_cur</code> &mdash; length-normalized, no reference</td></tr>
+</table></div>
+<p style="margin-top:6px">Nothing else differs. Every one of those chapters is Bradley-Terry with a different definition of strength.</p>
+</div>
+
+<div class="card">
+<h3>Step 5 — read the loss as a number</h3>
+<div class="scroll"><table>
+<tr><th>gap</th><th>P(winner wins)</th><th>loss = &minus;log(P)</th><th>meaning</th></tr>
+<tr><td>&minus;2</td><td>0.119</td><td style="color:#ef5350"><strong>2.13</strong></td><td>model has the pair backwards &mdash; big loss</td></tr>
+<tr><td>0</td><td>0.500</td><td>0.693</td><td>no opinion</td></tr>
+<tr><td>+1</td><td>0.731</td><td>0.313</td><td>mild preference</td></tr>
+<tr><td>+2</td><td>0.881</td><td>0.127</td><td>confident</td></tr>
+<tr><td>+5</td><td>0.993</td><td style="color:#4caf50">0.0067</td><td>near-certain</td></tr>
+</table></div>
+<p style="margin-top:6px">The loss <code>0.693</code> at gap 0 is worth memorizing &mdash; it is <code>log 2</code>, the "I know nothing" loss, and it is the number your training curve should start at.</p>
+</div>
+
+<button class="nx" onclick="go(3)">Next: three things that go wrong &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 3 ============================ -->
+<div class="page" data-t="3. What Breaks">
+<h2>Three Built-In Pathologies (You Have Seen All Three Already)</h2>
+
+<div class="card orange">
+<h3>1. The scale is arbitrary — only differences exist</h3>
+<p>Tab 1 showed the model depends only on <code>s_i &minus; s_j</code>. So the fit has no unique answer:</p>
+<div class="math">
+<div class="line">s = (A: 1.0,  B: 0.0,  C: &minus;2.0)</div>
+<div class="line">s = (A: 101.0, B: 100.0, C: 98.0)   <span class="cmt">// +100 to everything</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Both give IDENTICAL predictions and IDENTICAL loss.</span></div>
+</div>
+<p style="margin-top:6px"><strong>Where you met it:</strong> ch. 5&#x2019;s reward model outputs raw unbounded numbers and the page warns "don&#x2019;t read 0.82 as a probability &mdash; only the gap means anything." This is why. In practice people pin the scale by convention (Elo fixes an average; some RM code standardizes the scores).</p>
+</div>
+
+<div class="card red">
+<h3>2. An undefeated item has INFINITE strength — the "no stop gate"</h3>
+<p>Suppose A has won every comparison it appears in. What strength best explains that? Push the gap up and watch the loss:</p>
+<div class="scroll"><table>
+<tr><th>s(A)</th><th>gap vs B (s=0)</th><th>P(A wins)</th><th>loss</th></tr>
+<tr><td>1</td><td>1</td><td>0.731</td><td>0.313</td></tr>
+<tr><td>3</td><td>3</td><td>0.953</td><td>0.049</td></tr>
+<tr><td>5</td><td>5</td><td>0.993</td><td>0.0067</td></tr>
+<tr><td>10</td><td>10</td><td>0.99995</td><td>0.000045</td></tr>
+<tr><td>&rarr; &infin;</td><td>&rarr; &infin;</td><td>&rarr; 1</td><td style="color:#ef5350">&rarr; 0, never reaching it</td></tr>
+</table></div>
+<p style="margin-top:8px">Maximum likelihood wants <code>s(A) = +&infin;</code>. There is no finite best answer, because <strong>sigmoid never actually reaches 1</strong>, so the loss can always be reduced a little further by pushing harder.</p>
+<p style="margin-top:6px"><span class="key">This is the deep reason behind something you already met twice.</span> Ch. 5 tab 4&#x2019;s "the RM loop has no natural stop" and ch. 6&#x2019;s "the first loss never stops working" are not quirks of those implementations &mdash; they are this property of Bradley-Terry itself. Every fix in those chapters (early stopping at ~1 epoch, validation-accuracy gating, SimPO&#x2019;s target margin &gamma;, IPO&#x2019;s bounded loss) exists to supply the stopping rule that maximum likelihood refuses to provide.</p>
+</div>
+
+<div class="card">
+<h3>3. Contradictory data freezes — and that sets the accuracy ceiling</h3>
+<p>Humans disagree, so real data contains cycles:</p>
+<div class="math">
+<div class="line">A beat B      B beat C      C beat A</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// No ranking can satisfy all three. What does the fit do?</span></div>
+<div class="line"><span class="cmt">// By symmetry, every item wins once and loses once, so the pulls</span></div>
+<div class="line">// cancel exactly and all three strengths stay EQUAL:</div>
+<div class="line">&nbsp;</div>
+<div class="line">s(A) = s(B) = s(C)  &rarr;  every gap = 0  &rarr;  every P = 0.5</div>
+<div class="line">loss stuck at &minus;log(0.5) = <span class="val">0.693</span> on these pairs, forever</div>
+</div>
+<p style="margin-top:6px"><strong>Where you met it:</strong> ch. 5 tab 7 derives the reward model&#x2019;s 65&ndash;75% accuracy ceiling from exactly this. Cyclic pairs are <em>unlearnable</em>, not under-trained &mdash; more epochs cannot resolve a contradiction, they can only memorize which contradictory pairs happened to appear, which is the definition of overfitting.</p>
+</div>
+
+<div class="card purple">
+<h3>4. And one that only shows up in leaderboards: disconnected groups</h3>
+<div class="math">
+<div class="line">A beat B  (many times)        C beat D  (many times)</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Nobody from {A,B} ever played anybody from {C,D}.</span></div>
+<div class="line"><span class="cmt">// You can slide the whole second group up or down by any amount</span></div>
+<div class="line">// without changing the loss at all. A-vs-C is UNDETERMINED.</div>
+</div>
+<p style="margin-top:6px">Win rate would happily report "A: 100%, C: 100%, therefore tied." Bradley-Terry instead tells you the honest answer: that comparison is not identified by your data. This is why arena leaderboards need every model to play a shared pool of opponents, and why a preference dataset wants overlapping prompts rather than isolated islands.</p>
+</div>
+
+<button class="nx" onclick="go(4)">Next: Elo, arenas, and the recap &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 4 ============================ -->
+<div class="page" data-t="4. Elo & Recap">
+<h2>The Same Model in Its Other Clothes</h2>
+
+<div class="card blue">
+<h3>Elo is Bradley-Terry with a rescaled axis</h3>
+<p>Chess ratings look nothing like <code>sigmoid(s_i &minus; s_j)</code>, but they are the same model:</p>
+<div class="math">
+<div class="line"><span class="cmt">// Elo's expected-score formula:</span></div>
+<div class="line">P(i beats j) = 1 / ( 1 + 10^((R_j &minus; R_i)/400) )</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Bradley-Terry:</span></div>
+<div class="line">P(i beats j) = 1 / ( 1 + e^(s_j &minus; s_i) )</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Identical, with one change of units. Since 10^x = e^(x·ln10):</span></div>
+<div class="line">s = R &times; ln(10) / 400 = R / <span class="val">173.7</span></div>
+</div>
+<p style="margin-top:6px">So Elo points are just Bradley-Terry strength with a friendlier scale. The famous landmark falls straight out:</p>
+<div class="scroll"><table>
+<tr><th>Elo gap</th><th>strength gap</th><th>P(stronger wins)</th><th>odds</th></tr>
+<tr><td>0</td><td>0</td><td>0.500</td><td>1 : 1</td></tr>
+<tr><td>200</td><td>1.151</td><td>0.760</td><td>~3 : 1</td></tr>
+<tr><td>400</td><td>2.303</td><td>0.909</td><td><strong>10 : 1</strong></td></tr>
+</table></div>
+<p style="margin-top:6px;font-size:.88em">"400 points = ten times as likely to win" is the standard chess rule of thumb, and it is exactly <code>ln(10) = 2.303</code> in strength units. Elo also differs in <em>how</em> it fits: instead of solving for all strengths at once, it nudges after every game &mdash; online gradient ascent on the same likelihood, with the K-factor as the learning rate.</p>
+</div>
+
+<div class="card green">
+<h3>LLM arenas: the same fit, on models instead of players</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Items      = the models</span></div>
+<div class="line">// Comparison = a human picks the better of two anonymous replies</div>
+<div class="line">// Fit        = Bradley-Terry over all those votes</div>
+<div class="line">// Output     = the leaderboard number</div>
+</div>
+<p style="margin-top:6px">Which means the leaderboard inherits every pathology from tab 3: the scale is conventional (differences are the only real content), a model that has played few opponents has a poorly-determined score, and human disagreement caps how sharply models can be separated at all.</p>
+</div>
+
+<div class="card orange">
+<h3>Review questions</h3>
+<div class="scroll"><table>
+<tr><th style="width:40%">Question</th><th>One-line answer</th></tr>
+<tr><td>"What is the Bradley-Terry model?"</td><td>One latent strength per item, with <code>P(i beats j) = exp(s_i)/(exp(s_i)+exp(s_j))</code>, fitted by maximum likelihood over observed pairwise comparisons.</td></tr>
+<tr><td>"Why does the reward-model loss look like <code>&minus;log sigmoid(gap)</code>?"</td><td>It is the negative log-likelihood of that model: the sigmoid is what the exp-share formula equals, and the log turns the product over comparisons into a sum.</td></tr>
+<tr><td>"Why are RM scores unbounded and only meaningful as differences?"</td><td>The model depends only on <code>s_i &minus; s_j</code>, so the scale and origin are unidentifiable &mdash; adding a constant to every score changes nothing.</td></tr>
+<tr><td>"Why does RM training overfit so fast?"</td><td>Maximum likelihood drives an undefeated item's strength to infinity, so the loss never stops shrinking &mdash; the stopping rule has to come from outside (validation accuracy, ~1 epoch).</td></tr>
+<tr><td>"Why can't a reward model exceed ~70% accuracy?"</td><td>Human disagreement creates cyclic comparisons whose gradients cancel exactly; those pairs are unlearnable at any amount of training.</td></tr>
+<tr><td>"How is Elo related?"</td><td>Same model, rescaled: <code>s = R&middot;ln(10)/400</code>, fitted online one game at a time with K as the learning rate.</td></tr>
+<tr><td>"Why not just use win rate?"</td><td>Win rate ignores opponent strength, so beating a champion once and a beginner nine times look identical.</td></tr>
+</table></div>
+</div>
+
+<div class="card purple">
+<h3>Recap — the whole chapter in five lines</h3>
+<div class="scroll"><table>
+<tr><th>#</th><th>Step</th></tr>
+<tr><td>1</td><td>Give every item one strength, any real number.</td></tr>
+<tr><td>2</td><td><code>exp</code> them so they are positive, then take proportions &rarr; <code>exp(s_i)/(exp(s_i)+exp(s_j))</code>.</td></tr>
+<tr><td>3</td><td>Divide through and that <em>equals</em> <code>sigmoid(s_i &minus; s_j)</code> &mdash; so only gaps matter and sigmoid was never a choice.</td></tr>
+<tr><td>4</td><td>Ask which strengths make the observed results most likely; take the log of the product, flip the sign &rarr; <code>&minus;log sigmoid(gap)</code>.</td></tr>
+<tr><td>5</td><td>Ch. 5, 6 and 14 are that one line with <code>RM(&middot;)</code>, <code>&beta;&middot;log(P_cur/P_ref)</code> and <code>(&beta;/|y|)&middot;log P</code> substituted for strength.</td></tr>
+</table></div>
+</div>
+
+<div class="card">
+<h3>Sources</h3>
+<p style="font-size:.88em">Bradley &amp; Terry, <em>Rank Analysis of Incomplete Block Designs</em> (Biometrika, 1952); the equivalent noisy-performance formulation is Luce&#x2019;s choice axiom / the Gumbel-max result, and the Normal-noise variant is Thurstone (1927). Elo&#x2019;s formula and the 400-point convention are standard chess-federation definitions. Every number on these pages is hand-derivable from <code>sigmoid(x) = 1/(1+e^(&minus;x))</code> and <code>ln(10) = 2.303</code>.</p>
+</div>
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page');const nav=document.getElementById('nav');
+pages.forEach((p,i)=>{const b=document.createElement('button');b.textContent=p.dataset.t;b.onclick=()=>go(i);if(i===0)b.classList.add('on');nav.appendChild(b);});
+function go(n){pages.forEach((p,i)=>p.classList.toggle('on',i===n));nav.querySelectorAll('button').forEach((b,i)=>{b.classList.remove('on');if(i<n)b.classList.add('done');else b.classList.remove('done');if(i===n)b.classList.add('on');});window.scrollTo({top:0,behavior:'smooth'});}
+</script>
+</body>
+</html>

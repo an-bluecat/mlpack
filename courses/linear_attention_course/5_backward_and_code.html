@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>5. Backward, then the complete implementation | Linear attention</title><link rel="stylesheet" href="course.css"><script src="course.js" defer></script></head>
+<body><main class="shell"><nav class="crumb" aria-label="Breadcrumb"><a href="../index.html">All ML courses</a><a href="index.html">Linear attention course</a></nav>
+<header><h1>5. Backward, then the complete implementation</h1><p class="sub">Follow a last-token loss into earlier values. Then verify the assembled code against an independent reference.</p></header><div class="nav" role="tablist" aria-label="Lesson sections"><button type="button" id="tab-0" role="tab" aria-controls="page-0" aria-selected="true" tabindex="0">1. Gradients through the read</button><button type="button" id="tab-1" role="tab" aria-controls="page-1" aria-selected="false" tabindex="-1">2. One real backward pass</button><button type="button" id="tab-2" role="tab" aria-controls="page-2" aria-selected="false" tabindex="-1">3. Code with the shapes visible</button><button type="button" id="tab-3" role="tab" aria-controls="page-3" aria-selected="false" tabindex="-1">4. Verification and capstone</button></div><section id="page-0" role="tabpanel" aria-labelledby="tab-0"><h2>Gradients through the read</h2><div class="card blue"><h3>The quotient has two gradient paths</h3><div class="math">u: mapped query (M,)    S: memory (M,Dv)
+z: key sum (M,)         y: output (Dv,)
+d = uᵀz                y = Sᵀu / d
+g = ∂L/∂y              assume d is above the floor
+
+∂L/∂S = u gᵀ / d
+∂L/∂z = −u (g·y) / d
+∂L/∂u = (Sg − z(g·y)) / d</div><p>S and z both depend on keys. A key affects the numerator <em>and</em> the denominator, so treating the denominator as a constant produces the wrong gradient. These are derivatives of the ordinary quotient rule, not a special training trick.</p></div><details class="more"><summary>Refresher: how do I get the first derivative without matrix calculus?</summary><div><p>Output coordinate b is y_b = Σ_a u_a S_ab / d. Change only S_ab while holding u,z fixed: y_b changes by u_a/d. Multiply that by the upstream derivative g_b. Therefore the whole S derivative has entries u_a g_b/d.</p></div></details><div class="card "><h3>Backprop through a write</h3><div class="math">S_t = S_(t−1) + a_t v_tᵀ
+
+∂S_t / ∂S_(t−1) = identity
+if G = ∂L/∂S_t, then write contributes:
+∂L/∂v_t = Gᵀ a_t
+∂L/∂a_t = G v_t  (plus the z-path derivative)</div><p>The additive state offers a direct path into earlier writes. Future losses add to each token’s gradients. Raw Q/K gradients then multiply by the feature-map derivative; projection weights train by the usual chain rule. This does not guarantee all gradients stay well scaled.</p></div><button type="button" class="next-tab" data-next="page-1">Next: One real backward pass</button></section><section id="page-1" role="tabpanel" aria-labelledby="tab-1" hidden><h2>One real backward pass</h2><div class="card green"><h3>Only the final output enters this loss</h3><div class="math">last output = [3, 2.166667]
+target for its first coordinate = 1
+L = (3−1)² = 4
+∂L/∂y_last = [4,0]</div><p>The last query has weights [3,4,5], total 12. Each value’s first coordinate receives 4 times its normalized attention weight.</p></div><p class="output-label">Output — real CPU run, float64, PyTorch 2.8.0</p><pre class="output">dL/dV
+[1, 0]
+[1.333333, 0]
+[1.666667, 0]
+
+dL/dK (raw keys)
+[-0.666667, -0.333333]
+[-2, -1]
+[2, 1]
+
+dL/dQ (raw queries)
+[0, 0]
+[0, 0]
+[0.666667, -1.333333]</pre><div class="card "><h3>Read the zero rows correctly</h3><p>The first two query rows have zero gradients because this loss uses only the last output; earlier queries do not write to S. Earlier keys and values <em>do</em> receive gradients because the last query reads their writes. In a larger model with losses at every position, other paths will contribute too.</p></div><div class="card purple"><h3>Check yourself</h3><p>If I detach S after token 2, do I still get the right forward answer? The right full-sequence gradient?</p><details class="more"><summary>Show the reasoning</summary><div><p>The forward answer can match exactly because detach keeps the numerical value. But gradients from token 3 cannot cross that boundary into the earlier writes. It is truncated backpropagation, not the same full gradient.</p></div></details></div><button type="button" class="next-tab" data-next="page-2">Next: Code with the shapes visible</button></section><section id="page-2" role="tabpanel" aria-labelledby="tab-2" hidden><h2>Code with the shapes visible</h2><div class="card blue"><h3>Run the notebook before reading the function cold</h3><p>The <a href="lab.py">reference lab</a> includes the complete implementation and verification checks. Q/K/V use (B,H,T,D). Here B is batch, H is heads. ELU+1 keeps M=Dk.</p></div><div class="table-wrap"><table><thead><tr><th scope="col">Operation</th><th scope="col">Shape</th></tr></thead><tbody><tr><td>qf, kf</td><td>B,H,T,M</td></tr><tr><td>kf.transpose(-1,-2) @ v</td><td>B,H,M,Dv</td></tr><tr><td>kf.sum(dim=-2)</td><td>B,H,M</td></tr><tr><td>qf @ state</td><td>B,H,T,Dv</td></tr><tr><td>sum(qf * key_sum, features)</td><td>B,H,T,1</td></tr></tbody></table></div><pre><code>def linear_attention(q, k, v, eps=1e-6):
+    &quot;&quot;&quot;Bidirectional: all query positions can read all key/value positions.&quot;&quot;&quot;
+    qf, kf = phi(q), phi(k)
+    state = kf.transpose(-1, -2) @ v        # (B, H, M, Dv)
+    key_sum = kf.sum(dim=-2)               # (B, H, M)
+    numerator = qf @ state                # (B, H, T, Dv)
+    denominator = (qf * key_sum.unsqueeze(-2)).sum(-1, keepdim=True)
+    return numerator / denominator.clamp_min(eps)</code></pre><details class="more"><summary>Refresher: why unsqueeze(-2), not unsqueeze(-1)?</summary><div><p>key_sum is (B,H,M). We want to reuse it for every time position, so insert time before M: (B,H,1,M). It then multiplies qf of shape (B,H,T,M). Sum the last feature axis with keepdim=True to get (B,H,T,1).</p></div></details><details class="more"><summary>Show the causal assembly after the notebook dissection</summary><div><pre><code>def recurrent_attention(q, k, v, initial_state=None, eps=1e-6):
+    &quot;&quot;&quot;Inclusive causal attention; returns output and state for continuation.
+
+    Uses out-of-place additions so autograd can retain the earlier states.
+    For inference, call inside torch.no_grad(). For full BPTT, do not detach
+    the returned state between chunks. At least one token is required.
+    &quot;&quot;&quot;
+    qf, kf = phi(q), phi(k)
+    if initial_state is None:
+        state = q.new_zeros(*q.shape[:2], qf.shape[-1], v.shape[-1])
+        key_sum = q.new_zeros(*q.shape[:2], qf.shape[-1])
+    else:
+        state, key_sum = initial_state
+    outputs = []
+    for t in range(q.shape[-2]):
+        qt, kt, vt = qf[:, :, t], kf[:, :, t], v[:, :, t]
+        state = state + kt.unsqueeze(-1) * vt.unsqueeze(-2)
+        key_sum = key_sum + kt
+        numerator = (qt.unsqueeze(-2) @ state).squeeze(-2)
+        denominator = (qt * key_sum).sum(-1, keepdim=True)
+        outputs.append(numerator / denominator.clamp_min(eps))
+    return torch.stack(outputs, dim=-2), (state, key_sum)</code></pre></div></details><div class="card orange"><h3>This function is bidirectional</h3><p>It is the rule in your TorchCode linear-attention exercise. A GPT needs the causal recurrence or a verified causal chunk/scan implementation. Reusing the full KᵀV in a causal language model leaks future tokens.</p></div><button type="button" class="next-tab" data-next="page-3">Next: Verification and capstone</button></section><section id="page-3" role="tabpanel" aria-labelledby="tab-3" hidden><h2>Verification and capstone</h2><div class="card "><h3>Compare against the same mathematical rule</h3><p>The lab explicitly forms φ(Q)φ(K)ᵀ, applies the mask when requested, normalizes rows, then multiplies by V. This quadratic reference is deliberately different code from the recurrence. Compare outputs and Q/K/V gradients using a random weighted output loss.</p></div><p class="output-label">Output — real CPU run, float64, PyTorch 2.8.0</p><pre class="output">seed = 7
+forward + gradient comparisons = 15
+max gradient discrepancy = 4.441e-16
+PASS: finite-difference gradcheck
+PASS: streaming forward AND gradients
+PASS: future-key/value isolation
+PASS: finite output/gradient for zero feature mass</pre><pre><code>.venv/bin/python courses/linear_attention_course/lab.py
+.venv/bin/python scripts/build_linear_attention_notebook.py</code></pre><div class="card blue"><h3>Build a full block after the primitive passes</h3><pre><code>x = x + out_proj(causal_linear_attention(q_proj(norm(x)),
+                                          k_proj(norm(x)),
+                                          v_proj(norm(x))))
+x = x + mlp(norm2(x))</code></pre><p>This is a structural sketch, not a complete module: split/merge heads, state ownership, positions, dtype, padding and sequence boundaries still need implementation. Compute norm(x) once in real code. The residual bypasses normalization just as in your pre-norm GPT block.</p></div><div class="card "><h3>Capstone: compare recall under a fixed budget</h3><p>Train a small softmax model and a linear model on a synthetic key-value recall task with matching data, width and optimizer settings. Report retrieval accuracy as distractors increase, especially when a key is overwritten. Measure prefill and decode separately and record device, dtype, lengths and warmups. You are testing a memory/quality tradeoff, not proving one mechanism universally better.</p><p>Exercises and the full testable implementations are in the notebook and <a href="lab.py">lab.py</a>. Your existing exercise notebook has not been filled in.</p></div></section><nav class="chapter-links" aria-label="Between lessons"><a href="4_recurrence.html">Previous: 4. A causal attention layer is a recurrent memory</a><a href="6_limits_and_extensions.html">Next: 6. What the small memory forgets</a></nav><div class="sources">Sources: <a href="https://proceedings.mlr.press/v119/katharopoulos20a.html">Katharopoulos et al. (2020), Transformers are RNNs</a>.<p>Numeric examples are computed by <a href="lab.py">lab.py</a>; <a href="verified_results.json">captured results</a>. Rebuild sources: scripts/build_linear_attention_course.py.</p></div></main></body></html>

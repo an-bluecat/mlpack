@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SVD Ch1: A matrix turns circles into ellipses</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em;max-width:780px;margin-left:auto;margin-right:auto}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:880px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+a.nx{display:inline-block;padding:10px 24px;background:#4caf50;color:#000;border-radius:8px;font-weight:700;font-size:.9em;margin-top:14px;text-decoration:none}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 10px;border:1px solid #333;text-align:left;font-size:.84em}
+th{background:#1a1a3a;color:#4fc3f7}
+.scroll{overflow-x:auto}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',Consolas,monospace;font-size:.84em;line-height:1.8;overflow-x:auto}
+.math .line{margin:2px 0;display:block;white-space:pre}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.math .kw{color:#c586c0}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math.out{border-left:3px solid #4caf50;background:#0d1a12}
+.outlabel{display:block;font-size:.72em;color:#4caf50;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.key{color:#ffb74d;font-weight:600}
+.inline{font-family:'Fira Code',Consolas,monospace;background:#1a1a2e;border:1px solid #333;border-radius:4px;padding:1px 6px;font-size:.86em;color:#9cdcfe}
+a{color:#4fc3f7}
+ul{margin-left:20px;margin-top:6px}li{margin:4px 0}
+details{margin-top:12px}
+details summary{cursor:pointer;color:#888;font-size:.85em;padding:8px 12px;background:#12122a;border:1px solid #333;border-radius:8px}
+details summary:hover{color:#ccc;border-color:#555}
+details[open] summary{color:#4fc3f7;border-color:#4fc3f7}
+details .card{margin-top:10px}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+
+<h1>SVD Chapter 1: Circles into Ellipses</h1>
+<p class="sub">The SVD is usually introduced as a factorization to memorize. It is really the answer to one question you can ask about any matrix &mdash; <em>which directions does it stretch, and by how much?</em> This chapter asks that question and watches the answer appear as a shape. No factorization until chapter 2.</p>
+
+<div class="nav" id="nav"></div>
+
+<!-- PAGE 0 -->
+<div class="page on" data-t="0. A matrix stretches">
+<h2>Forget factorizations. Start with: what does a matrix DO?</h2>
+
+<div class="card blue">
+<h3>A matrix is a machine that eats a vector and returns a vector</h3>
+<p>Every matrix in this course is one thing: a function. Give it an arrow, it hands you back a different arrow. Our running example, for the whole course:</p>
+<div class="math">
+<span class="line"><span class="lbl">M</span> = [ 3   0 ]        <span class="lbl">y = M&middot;x</span></span>
+<span class="line">    [ 4   5 ]</span>
+</div>
+<p>Feed it the two most obvious inputs &mdash; the coordinate axes &mdash; and read off the answers. (Feeding a matrix e&#8321; = [1,0] just picks out its first column; that is what matrix&ndash;vector multiplication does.)</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  M &middot; [1, 0] = [3, 4]      length <span class="val">5.0000</span>     <span class="cmt"># = column 1</span></span>
+<span class="line">  M &middot; [0, 1] = [0, 5]      length <span class="val">5.0000</span>     <span class="cmt"># = column 2</span></span>
+</div>
+<p>Both inputs had length 1. Both outputs have length 5. So a reasonable guess: <em>"this matrix stretches things by about 5."</em></p>
+<p><span class="key">That guess is wrong, and the size of the error is the reason SVD exists.</span></p>
+</div>
+
+<div class="card red">
+<h3>Try directions the coordinate axes never showed you</h3>
+<p>Nothing forces us to test only [1,0] and [0,1]. Walk a unit vector around the circle and measure how long the output is at each angle:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run: |M&middot;x| for unit x at angle &theta;</span>
+<span class="line">  &theta;=  0&deg;   x=[ 1.0000, 0.0000]   Mx=[ 3.0000,  4.0000]   |Mx| = <span class="val">5.0000</span>   <span class="cmt"># e1</span></span>
+<span class="line">  &theta;= 30&deg;   x=[ 0.8660, 0.5000]   Mx=[ 2.5981,  5.9641]   |Mx| = <span class="val">6.5054</span></span>
+<span class="line">  &theta;= <span class="hl">45&deg;</span>   x=[ 0.7071, 0.7071]   Mx=[ 2.1213,  6.3640]   |Mx| = <span class="hl">6.7082</span>   <span class="cmt"># biggest</span></span>
+<span class="line">  &theta;= 60&deg;   x=[ 0.5000, 0.8660]   Mx=[ 1.5000,  6.3301]   |Mx| = <span class="val">6.5054</span></span>
+<span class="line">  &theta;= 90&deg;   x=[ 0.0000, 1.0000]   Mx=[ 0.0000,  5.0000]   |Mx| = <span class="val">5.0000</span>   <span class="cmt"># e2</span></span>
+<span class="line">  &theta;=120&deg;   x=[-0.5000, 0.8660]   Mx=[-1.5000,  2.3301]   |Mx| = <span class="val">2.7712</span></span>
+<span class="line">  &theta;=<span class="hl">135&deg;</span>   x=[-0.7071, 0.7071]   Mx=[-2.1213,  0.7071]   |Mx| = <span class="hl">2.2361</span>   <span class="cmt"># smallest</span></span>
+<span class="line">  &theta;=150&deg;   x=[-0.8660, 0.5000]   Mx=[-2.5981, -0.9641]   |Mx| = <span class="val">2.7712</span></span>
+</div>
+<p>The same matrix stretches one direction by <span class="key">6.71&times;</span> and another by <span class="key">2.24&times;</span> &mdash; a factor of 3 between them &mdash; and <em>neither of those directions is a coordinate axis.</em> Both axes happen to land on 5.0, right in the middle, telling you nothing about either extreme.</p>
+<p>That is the trap: <span class="key">a matrix's entries are written in coordinates that have nothing to do with what the matrix does.</span> The rows and columns are how it's stored, not how it behaves. To see the behaviour you have to ask in the matrix's own language &mdash; and finding that language is exactly what the SVD does.</p>
+</div>
+
+<div class="card">
+<h3>The question this course answers</h3>
+<div class="math">
+<span class="line">Given M, find:  <span class="hl">which input directions get stretched, and by how much.</span></span>
+</div>
+<p>Everything else &mdash; U, S, V, rank, condition number, low-rank approximation, PCA, LoRA, Muon &mdash; is an answer to that one question or a consequence of it. Nothing in this course is a new idea; it is all this sentence, unpacked.</p>
+</div>
+<button class="nx" onclick="go(1)">Next: ask ALL the directions at once &rarr;</button>
+</div>
+
+<!-- PAGE 1 -->
+<div class="page" data-t="1. Circle to ellipse">
+<h2>Feed it every direction at once, and a shape appears</h2>
+
+<div class="card blue">
+<h3>The whole set of unit vectors is a circle</h3>
+<p>The table on page 0 sampled eight angles. Sample all of them &mdash; the set of every unit-length input <em>is</em> the unit circle &mdash; and push the entire circle through M. Every point on the circle is an input; its image is an output.</p>
+<svg viewBox="0 0 760 300" style="width:100%;max-width:760px;display:block;margin:14px auto" font-family="'Segoe UI',system-ui,sans-serif" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4fc3f7"/></marker>
+<marker id="aO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ffb74d"/></marker>
+<marker id="aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9aa0b5"/></marker>
+</defs>
+<line x1="80" y1="155" x2="250" y2="155" stroke="#222"/><line x1="165" y1="70" x2="165" y2="240" stroke="#222"/>
+<polyline fill="none" stroke="#555" stroke-width="1.6" points="233.0,155.0 232.7,149.1 232.0,143.2 230.7,137.4 228.9,131.7 226.6,126.3 223.9,121.0 220.7,116.0 217.1,111.3 213.1,106.9 208.7,102.9 204.0,99.3 199.0,96.1 193.7,93.4 188.3,91.1 182.6,89.3 176.8,88.0 170.9,87.3 165.0,87.0 159.1,87.3 153.2,88.0 147.4,89.3 141.7,91.1 136.3,93.4 131.0,96.1 126.0,99.3 121.3,102.9 116.9,106.9 112.9,111.3 109.3,116.0 106.1,121.0 103.4,126.3 101.1,131.7 99.3,137.4 98.0,143.2 97.3,149.1 97.0,155.0 97.3,160.9 98.0,166.8 99.3,172.6 101.1,178.3 103.4,183.7 106.1,189.0 109.3,194.0 112.9,198.7 116.9,203.1 121.3,207.1 126.0,210.7 131.0,213.9 136.3,216.6 141.7,218.9 147.4,220.7 153.2,222.0 159.1,222.7 165.0,223.0 170.9,222.7 176.8,222.0 182.6,220.7 188.3,218.9 193.7,216.6 199.0,213.9 204.0,210.7 208.7,207.1 213.1,203.1 217.1,198.7 220.7,194.0 223.9,189.0 226.6,183.7 228.9,178.3 230.7,172.6 232.0,166.8 232.7,160.9 233.0,155.0"/>
+<line x1="165" y1="155" x2="213.1" y2="106.9" stroke="#4fc3f7" stroke-width="2.4" marker-end="url(#aB)"/>
+<text x="219" y="101" font-size="12" fill="#4fc3f7">v&#8321; (45&deg;)</text>
+<line x1="165" y1="155" x2="213.1" y2="203.1" stroke="#ffb74d" stroke-width="2.4" marker-end="url(#aO)"/>
+<text x="219" y="213" font-size="12" fill="#ffb74d">v&#8322; (&minus;45&deg;)</text>
+<text x="165" y="268" text-anchor="middle" font-size="12.5" fill="#e0e0e0">every input of length 1</text>
+<text x="165" y="286" text-anchor="middle" font-size="11" fill="#9aa0b5">a circle</text>
+<line x1="290" y1="155" x2="370" y2="155" stroke="#9aa0b5" stroke-width="2" marker-end="url(#aG)"/>
+<text x="330" y="146" text-anchor="middle" font-size="12.5" fill="#9aa0b5">M</text>
+<line x1="470" y1="155" x2="620" y2="155" stroke="#222"/><line x1="545" y1="40" x2="545" y2="272" stroke="#222"/>
+<polyline fill="none" stroke="#4caf50" stroke-width="1.8" points="596.0,87.0 595.8,79.9 595.2,73.3 594.3,67.3 592.9,62.0 591.2,57.4 589.2,53.6 586.8,50.5 584.1,48.3 581.1,46.8 577.8,46.2 574.3,46.4 570.5,47.4 566.6,49.2 562.4,51.9 558.2,55.3 553.9,59.5 549.4,64.4 545.0,70.0 540.6,76.3 536.1,83.1 531.8,90.5 527.6,98.4 523.4,106.7 519.5,115.4 515.7,124.4 512.2,133.6 508.9,143.0 505.9,152.5 503.2,161.9 500.8,171.4 498.8,180.7 497.1,189.8 495.7,198.7 494.8,207.2 494.2,215.3 494.0,223.0 494.2,230.1 494.8,236.7 495.7,242.7 497.1,248.0 498.8,252.6 500.8,256.4 503.2,259.5 505.9,261.7 508.9,263.2 512.2,263.8 515.7,263.6 519.5,262.6 523.4,260.8 527.6,258.1 531.8,254.7 536.1,250.5 540.6,245.6 545.0,240.0 549.4,233.7 553.9,226.9 558.2,219.5 562.4,211.6 566.6,203.3 570.5,194.6 574.3,185.6 577.8,176.4 581.1,167.0 584.1,157.5 586.8,148.1 589.2,138.6 591.2,129.3 592.9,120.2 594.3,111.3 595.2,102.8 595.8,94.7 596.0,87.0"/>
+<line x1="545" y1="155" x2="581.1" y2="46.8" stroke="#4fc3f7" stroke-width="2.4" marker-end="url(#aB)"/>
+<text x="588" y="44" font-size="12" fill="#4fc3f7">&sigma;&#8321;u&#8321;, length 6.71</text>
+<line x1="545" y1="155" x2="581.1" y2="167.0" stroke="#ffb74d" stroke-width="2.4" marker-end="url(#aO)"/>
+<text x="588" y="176" font-size="12" fill="#ffb74d">&sigma;&#8322;u&#8322;, length 2.24</text>
+<text x="545" y="292" text-anchor="middle" font-size="12.5" fill="#4caf50">every output</text>
+</svg>
+<p><span class="key">A circle goes in; an ellipse comes out.</span> Not sometimes &mdash; always, for every matrix. That is the single most useful fact about matrices, and it is enough to define everything that follows.</p>
+</div>
+
+<div class="card green">
+<h3>Why it has to be an ellipse (not an egg, not a blob)</h3>
+<p>Worth one sentence, because "always" is a strong claim. A matrix is <em>linear</em>: it maps straight lines to straight lines and preserves proportions along them. A circle is the set of points at distance 1; linearity means the image is stretched by a factor that varies smoothly with direction and repeats every half-turn. The only closed curves with that symmetry are ellipses. No matrix can produce a dent, a corner, or an egg &mdash; those would need the stretch factor to behave differently at x and &minus;x, and <span class="inline">M(&minus;x) = &minus;M(x)</span> forbids it.</p>
+</div>
+
+<div class="card orange">
+<h3>An ellipse is described by exactly four numbers &mdash; and so is M</h3>
+<p>Look at what you need to draw that output ellipse and nothing more:</p>
+<div class="scroll"><table>
+<tr><th>to draw the ellipse you need</th><th>for our M</th><th>read it as</th></tr>
+<tr><td>the direction of its long axis</td><td>u&#8321; = [1, 3]/&radic;10</td><td>which output direction M pushes hardest into</td></tr>
+<tr><td>the length of that half-axis</td><td>&sigma;&#8321; = 6.7082</td><td><span class="key">how hard</span></td></tr>
+<tr><td>the direction of its short axis</td><td>u&#8322; = [3, &minus;1]/&radic;10</td><td>the weakest output direction</td></tr>
+<tr><td>the length of that half-axis</td><td>&sigma;&#8322; = 2.2361</td><td><span class="key">how weakly</span></td></tr>
+</table></div>
+<p>A 2&times;2 matrix has four entries; its ellipse needs four numbers. Nothing was lost &mdash; the information was <em>re-expressed</em>, from "how it is stored" into "what it does." <span class="key">That change of description is the entire SVD.</span></p>
+<p>And the two axis directions are perpendicular. That is not a fluke of this example either &mdash; an ellipse's axes always are, so the answer always arrives as a clean set of right angles. Check ours:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  u&#8321; &middot; u&#8322; = (1&times;3 + 3&times;(&minus;1))/10 = 0/10 = <span class="hl">0</span>     <span class="cmt"># perpendicular</span></span>
+</div>
+</div>
+<button class="nx" onclick="go(2)">Next: which inputs made those axes? &rarr;</button>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page" data-t="2. The inputs behind it">
+<h2>Two families of directions, not one</h2>
+
+<div class="card">
+<h3>The axes are outputs. What went IN to produce them?</h3>
+<p>Page 1 named u&#8321; and u&#8322; &mdash; the ellipse's axis <em>directions</em>, which live in output space. But every output came from some input. So each axis has a partner: <span class="key">the input direction that lands on it</span>. Page 0's table already found them, we just did not name them:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  the input at <span class="hl">45&deg;</span>   &mdash; call it <span class="lbl">v&#8321;</span> = [1, 1]/&radic;2  &mdash; produced the LONGEST output (6.7082)</span>
+<span class="line">  the input at <span class="hl">&minus;45&deg;</span>  &mdash; call it <span class="lbl">v&#8322;</span> = [1,&minus;1]/&radic;2  &mdash; produced the SHORTEST output (2.2361)</span>
+</div>
+<p>So there are <em>two</em> sets of perpendicular directions in play, and confusing them is the classic beginner mistake:</p>
+<div class="scroll"><table>
+<tr><th></th><th>lives in</th><th>meaning</th><th>ours</th></tr>
+<tr><td><span class="key">v&#8321;, v&#8322;</span></td><td><em>input</em> space</td><td>the directions you feed in to hit the extremes</td><td>[1,1]/&radic;2 and [1,&minus;1]/&radic;2</td></tr>
+<tr><td><span class="key">u&#8321;, u&#8322;</span></td><td><em>output</em> space</td><td>where those land &mdash; the ellipse's axes</td><td>[1,3]/&radic;10 and [3,&minus;1]/&radic;10</td></tr>
+<tr><td><span class="key">&sigma;&#8321;, &sigma;&#8322;</span></td><td>just numbers</td><td>the stretch applied on the way</td><td>6.7082 and 2.2361</td></tr>
+</table></div>
+<p>They are different vectors. v&#8321; = [1,1]/&radic;2 is <em>not</em> u&#8321; = [1,3]/&radic;10, and there is no reason it should be &mdash; one is a question, the other an answer.</p>
+</div>
+
+<div class="card green">
+<h3>The one sentence the whole course rests on</h3>
+<div class="math">
+<span class="line"><span class="hl">M &middot; v&#7522;  =  &sigma;&#7522; &middot; u&#7522;</span>      <span class="cmt"># feed in v&#7522;, get out u&#7522; stretched by &sigma;&#7522;</span></span>
+</div>
+<p>Read it in words: <em>"there is a special set of perpendicular input directions which M maps to a perpendicular set of output directions, doing nothing but scaling on the way."</em> For a general input the matrix rotates <em>and</em> stretches <em>and</em> shears in a tangled way; along the v's it does one clean thing. Check both, with the actual arithmetic:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  M&middot;v&#8321; = [3,0;4,5]&middot;[0.7071, 0.7071] = [<span class="val">2.1213</span>, <span class="val">6.3640</span>]</span>
+<span class="line">  &sigma;&#8321;&middot;u&#8321; = 6.7082 &times; [0.3162, 0.9487]     = [<span class="val">2.1213</span>, <span class="val">6.3640</span>]   <span class="hl">same &#10003;</span></span>
+<span class="line"></span>
+<span class="line">  M&middot;v&#8322; = [3,0;4,5]&middot;[0.7071,&minus;0.7071] = [<span class="val">2.1213</span>, <span class="val">&minus;0.7071</span>]</span>
+<span class="line">  &sigma;&#8322;&middot;u&#8322; = 2.2361 &times; [0.9487, &minus;0.3162]    = [<span class="val">2.1213</span>, <span class="val">&minus;0.7071</span>]   <span class="hl">same &#10003;</span></span>
+</div>
+</div>
+
+<div class="card purple">
+<h3>Carry forward</h3>
+<ul>
+<li>A matrix is a function; its <em>entries</em> are storage, not behaviour. Both columns of M have length 5, and neither number is the max stretch (6.71) or the min (2.24).</li>
+<li>Push the unit circle through any matrix and you get an <span class="key">ellipse</span> &mdash; always, because the map is linear.</li>
+<li>That ellipse needs four numbers: two axis directions and two half-lengths. So does the matrix. Same information, better language.</li>
+<li>Three named objects: <span class="key">v&#7522;</span> input directions, <span class="key">u&#7522;</span> output directions, <span class="key">&sigma;&#7522;</span> stretches &mdash; tied together by <span class="inline">M v&#7522; = &sigma;&#7522; u&#7522;</span>.</li>
+<li>Nothing has been factored yet. Chapter 2 turns that one equation into the familiar <span class="inline">M = U S V&#7488;</span>, and then computes all six numbers from scratch.</li>
+</ul>
+</div>
+<a class="nx" href="2_finding_it.html">Chapter 2: where U, S and V actually come from &rarr;</a>
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page'),nav=document.getElementById('nav');
+pages.forEach((p,i)=>{const b=document.createElement('button');b.textContent=p.dataset.t;b.onclick=()=>go(i);if(i===0)b.classList.add('on');nav.appendChild(b);});
+function go(n){pages.forEach((p,i)=>p.classList.toggle('on',i===n));nav.querySelectorAll('button').forEach((b,i)=>{b.classList.remove('on');if(i<n)b.classList.add('done');else b.classList.remove('done');if(i===n)b.classList.add('on');});window.scrollTo({top:0,behavior:'smooth'});}
+</script>
+</body>
+</html>

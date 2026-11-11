@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SVD Ch3: Reading the numbers</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em;max-width:780px;margin-left:auto;margin-right:auto}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:880px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+a.nx{display:inline-block;padding:10px 24px;background:#4caf50;color:#000;border-radius:8px;font-weight:700;font-size:.9em;margin-top:14px;text-decoration:none}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 10px;border:1px solid #333;text-align:left;font-size:.84em}
+th{background:#1a1a3a;color:#4fc3f7}
+.scroll{overflow-x:auto}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',Consolas,monospace;font-size:.84em;line-height:1.8;overflow-x:auto}
+.math .line{margin:2px 0;display:block;white-space:pre}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.math .kw{color:#c586c0}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math.out{border-left:3px solid #4caf50;background:#0d1a12}
+.outlabel{display:block;font-size:.72em;color:#4caf50;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.key{color:#ffb74d;font-weight:600}
+.inline{font-family:'Fira Code',Consolas,monospace;background:#1a1a2e;border:1px solid #333;border-radius:4px;padding:1px 6px;font-size:.86em;color:#9cdcfe}
+a{color:#4fc3f7}
+ul{margin-left:20px;margin-top:6px}li{margin:4px 0}
+details{margin-top:12px}
+details summary{cursor:pointer;color:#888;font-size:.85em;padding:8px 12px;background:#12122a;border:1px solid #333;border-radius:8px}
+details summary:hover{color:#ccc;border-color:#555}
+details[open] summary{color:#4fc3f7;border-color:#4fc3f7}
+details .card{margin-top:10px}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+
+<h1>SVD Chapter 3: Reading the Numbers</h1>
+<p class="sub">You can now compute a decomposition. This chapter is about what the numbers <em>tell</em> you &mdash; how many directions a matrix really has, how badly they disagree, how its content is distributed, and why truncating the list is the best compression that exists.</p>
+
+<div class="nav" id="nav"></div>
+
+<!-- PAGE 0 -->
+<div class="page on" data-t="0. Rank">
+<h2>Rank: how many directions survive</h2>
+
+<div class="card blue">
+<h3>Count the nonzero &sigma;'s. That's it.</h3>
+<p>A singular value of zero means one thing precisely: <span class="key">that direction is crushed to nothing.</span> Feed in v&#7522; and you get <span class="inline">&sigma;&#7522;u&#7522; = 0&middot;u&#7522; = 0</span> &mdash; the matrix has no opinion about it and no way to produce it. So:</p>
+<div class="math">
+<span class="line"><span class="hl">rank(M) = the number of nonzero singular values</span></span>
+</div>
+<p>Geometrically, in chapter 1's picture: a zero &sigma; means the ellipse is <em>flat</em> in that direction. A 2&times;2 with rank 1 doesn't map the circle to an ellipse at all &mdash; it maps it to a line segment.</p>
+</div>
+
+<div class="card">
+<h3>See it: three matrices, three ranks</h3>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  our M = [3 0; 4 5]        singular values [<span class="val">6.7082</span>, <span class="val">2.2361</span>]     rank <span class="hl">2</span>  <span class="cmt"># a real ellipse</span></span>
+<span class="line">  outer product e&middot;x&#7488;        singular values [<span class="val">3.2241</span>, <span class="val">0.0000</span>]     rank <span class="hl">1</span>  <span class="cmt"># a line segment</span></span>
+</div>
+<p>That second one is the object chapter 1 of the Muon chapter is built on: one training example's gradient. Every row of an outer product is the same vector rescaled, so <em>every</em> direction but one is crushed &mdash; and the SVD reports it as a single zero.</p>
+</div>
+
+<div class="card orange">
+<h3>Why rank is a better question than it looks</h3>
+<p>"How many independent directions does this thing actually contain?" turns out to be the question behind a surprising number of practical situations:</p>
+<div class="scroll"><table>
+<tr><th>situation</th><th>the rank fact</th></tr>
+<tr><td>gradient of a batch of B examples</td><td>rank &le; B &mdash; a batch of 32 gives a 4096&times;4096 weight at most 32 directions</td></tr>
+<tr><td>a LoRA adapter with r = 16</td><td>rank exactly 16 by construction: <span class="inline">BA</span> with inner dimension 16</td></tr>
+<tr><td>solving <span class="inline">Mx = b</span></td><td>a zero &sigma; means some b's are unreachable and some x's are invisible</td></tr>
+<tr><td>a data matrix of 1,000 nearly-identical rows</td><td>numerically rank &asymp; 1 &mdash; you have one measurement, repeated</td></tr>
+</table></div>
+<p><span class="key">Careful though:</span> exact zeros are a mathematician's luxury. In floating point you get 1e&minus;17, not 0. Real code asks "how many &sigma; are above a tolerance?" &mdash; which is why the next page's question, <em>how small is small</em>, matters more in practice than rank itself.</p>
+</div>
+<button class="nx" onclick="go(1)">Next: the ratio that decides everything &rarr;</button>
+</div>
+
+<!-- PAGE 1 -->
+<div class="page" data-t="1. Condition number">
+<h2>&sigma;&#8321;/&sigma;&#8345;: the number that has been haunting the optimizer course</h2>
+
+<div class="card blue">
+<h3>Definition, and what it measures</h3>
+<div class="math">
+<span class="line"><span class="hl">&kappa;(M) = &sigma;&#8321; / &sigma;&#8345;</span>      <span class="cmt"># biggest stretch divided by smallest</span></span>
+<span class="line"></span>
+<span class="line">for our M:  &kappa; = 6.7082 / 2.2361 = <span class="hl">3.0</span></span>
+</div>
+<p>Read it off the ellipse: &kappa; is <em>how far from circular</em> the output is. &kappa; = 1 means a perfect circle &mdash; every direction treated identically. &kappa; = 3 means our ellipse is three times longer than it is wide. &kappa; = &infin; means it collapsed to a line (some &sigma; is zero &mdash; that's rank deficiency).</p>
+</div>
+
+<div class="card green">
+<h3>This is exactly the optimizer course's disease, named</h3>
+<p>The optimizer course opened with a bowl <span class="inline">L = w&#8321;&sup2; + 10&middot;w&#8322;&sup2;</span>, curvatures 2 and 20, and called the ratio of 10 the "condition number" that forced SGD to zigzag. That was the same quantity as here &mdash; and now you can see <em>why</em> it is the deciding one:</p>
+<div class="scroll"><table>
+<tr><th>&kappa;</th><th>the ellipse</th><th>what one learning rate has to do</th></tr>
+<tr><td>1</td><td>a circle</td><td>one lr serves every direction perfectly</td></tr>
+<tr><td>10</td><td>10&times; longer than wide</td><td>lr must be small enough for the steep direction &rarr; 10&times; too small for the flat one &rarr; zigzag</td></tr>
+<tr><td>10&#8310;</td><td>a sliver</td><td>no usable single lr exists &mdash; this is the case adaptive optimizers were built for</td></tr>
+</table></div>
+<p>The optimizer course said "one number cannot describe many directions." <span class="key">The SVD is what tells you how many directions there are and how badly they disagree.</span> Same sentence, now measurable.</p>
+<p>The connection is exact, not an analogy: gradient descent on a quadratic converges at a rate governed by the condition number of its curvature matrix, and the <em>curvature</em> matrix for a least-squares problem <span class="inline">&#8214;Ax &minus; b&#8214;&sup2;</span> is <span class="inline">A&#7488;A</span> &mdash; whose eigenvalues, from chapter 2, are exactly &sigma;&sup2;. So <span class="inline">&kappa;(A&#7488;A) = &kappa;(A)&sup2;</span>: <em>squaring the matrix squares the difficulty.</em></p>
+</div>
+
+<div class="card red">
+<h3>The other thing &kappa; predicts: how much precision you lose</h3>
+<p>&kappa; is also the amplification factor for error. Nudge the input, and the output can move &kappa; times more (relatively) than it should &mdash; because the nudge might land along the direction M barely stretches, while the answer lives along the one it stretches hard.</p>
+<div class="math">
+<span class="line">rule of thumb:  solving with condition number 10&#7503; loses about k digits of accuracy</span>
+<span class="line"></span>
+<span class="line">  &kappa; = 10&sup3;   float32 (~7 digits)  &rarr;  ~4 good digits left</span>
+<span class="line">  &kappa; = 10&#8312;   float32              &rarr;  <span class="key">nothing left</span></span>
+</div>
+<p>This is why "ill-conditioned" is an insult in numerical computing, and why chapter 4's uses of the SVD are so often about <em>detecting</em> or <em>repairing</em> a bad &kappa;.</p>
+</div>
+<button class="nx" onclick="go(2)">Next: &sigma;&sup2; as a budget &rarr;</button>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page" data-t="2. Energy">
+<h2>&sigma;&sup2; is a budget, and it always adds up to the whole matrix</h2>
+
+<div class="card blue">
+<h3>The identity from chapter 2, taken seriously</h3>
+<div class="math out"><span class="outlabel">output &mdash; real run</span>
+<span class="line">  &#8214;M&#8214;&sup2;<sub>F</sub> = 3&sup2; + 0&sup2; + 4&sup2; + 5&sup2; = <span class="val">50</span>       &sigma;&#8321;&sup2; + &sigma;&#8322;&sup2; = 45 + 5 = <span class="val">50</span></span>
+</div>
+<p>The sum of squared entries equals the sum of squared singular values. Since the left side is a natural measure of "how big is this matrix," the right side says: <span class="key">that size is divided among the directions, and &sigma;&#7522;&sup2; is direction i's share.</span> Turn it into percentages and the matrix tells you where it keeps its content:</p>
+<div class="math">
+<span class="line">direction 1:  45/50 = <span class="hl">90%</span>       direction 2:  5/50 = <span class="hl">10%</span></span>
+</div>
+<p>So 90% of what our M "is" lives along one direction. That is a strong statement about a matrix whose four entries looked unremarkable.</p>
+</div>
+
+<div class="card green">
+<h3>The payoff: throw away the small directions and see what breaks</h3>
+<p>If direction 2 holds only 10%, what happens if we simply delete it? Keep the first term of <span class="inline">M = &sigma;&#8321;u&#8321;v&#8321;&#7488; + &sigma;&#8322;u&#8322;v&#8322;&#7488;</span> and drop the second:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run: A&#8321; = &sigma;&#8321; u&#8321; v&#8321;&#7488;</span>
+<span class="line">  A&#8321; = 6.7082 &times; [0.3162, 0.9487] &otimes; [0.7071, 0.7071]</span>
+<span class="line"></span>
+<span class="line">  A&#8321; =  [ 1.5  1.5 ]        M  =  [ 3.  0. ]      M &minus; A&#8321; = [  1.5  &minus;1.5 ]</span>
+<span class="line">         [ 4.5  4.5 ]              [ 4.  5. ]                [ &minus;0.5   0.5 ]</span>
+<span class="line"></span>
+<span class="line">  &#8214;M &minus; A&#8321;&#8214;<sub>F</sub> = <span class="val">2.236068</span>      &sigma;&#8322; = <span class="val">2.236068</span>      <span class="hl">identical</span></span>
+</div>
+<p>That is not a coincidence, and it is the most useful theorem attached to the SVD:</p>
+<div class="math">
+<span class="line"><span class="hl">Eckart&ndash;Young:</span> truncating the SVD after k terms gives the BEST possible rank-k</span>
+<span class="line">approximation, and the error you pay is exactly &sigma;<sub>k+1</sub>.</span>
+</div>
+<p>"Best" is a strong word &mdash; among <em>all</em> rank-k matrices in existence, none is closer to M. So the SVD doesn't just describe a matrix; it hands you an optimal compression, sorted, with the error known in advance.</p>
+</div>
+
+<div class="card orange">
+<h3>Structure has few directions; noise has many</h3>
+<p>Now the practical reading. Take three 12&times;12 matrices and count how many directions each needs to hold 99% of its energy:</p>
+<div class="math out"><span class="outlabel">output &mdash; real run: 12&times;12 matrices</span>
+<span class="line">  a solid SQUARE block          &sigma; = [6.000, 0.000, 0.000, &hellip;]     rank <span class="hl">1</span>   99% needs <span class="hl">1</span> of 12</span>
+<span class="line">  an x+y RAMP                   &sigma; = [143.9, 11.92, 0.000, &hellip;]     rank <span class="hl">2</span>   99% needs <span class="hl">1</span> of 12</span>
+<span class="line">  pure NOISE (gaussian)         &sigma; = [6.281, 5.533, 4.733, 3.386,</span>
+<span class="line">                                     3.279, 2.506, &hellip;]           rank <span class="hl">12</span>  99% needs <span class="hl">9</span> of 12</span>
+</div>
+<p>Read the spectra, not the matrices. A solid block is <em>rank 1</em> &mdash; it is "this set of rows" times "this set of columns," one outer product. A ramp is rank 2. But noise has no structure to exploit, so its energy is spread almost evenly and there is nothing to throw away.</p>
+<p><span class="key">That is the whole of SVD-based compression, and also the whole of SVD-based denoising</span> &mdash; the same act, judged differently: keep the top k directions, and you are either "compressing" (you wanted the structure) or "denoising" (you wanted to discard the rest). A fast decaying spectrum means the matrix has structure; a flat one means it doesn't.</p>
+<details><summary>Why is a solid rectangular block exactly rank 1?</summary>
+<div class="card"><p>Because you can write it as an outer product: let <span class="inline">r</span> be 1 for the rows the block covers and 0 elsewhere, and <span class="inline">c</span> the same for columns. Then the block is <span class="inline">r&middot;c&#7488;</span> &mdash; entry (i,j) is 1 exactly when row i <em>and</em> column j are inside. One outer product, so by page 0, rank 1. The single &sigma; = 6.0 is then <span class="inline">&#8214;r&#8214;&middot;&#8214;c&#8214; = &radic;6&middot;&radic;6</span>, since the block is 6&times;6.</p></div></details>
+</div>
+<button class="nx" onclick="go(3)">Next: SVD vs eigenvectors &rarr;</button>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page" data-t="3. Not eigenvectors">
+<h2>The confusion worth clearing up: SVD is not eigendecomposition</h2>
+
+<div class="card red">
+<h3>Our own matrix proves they're different</h3>
+<p>M = [3 0; 4 5] is triangular, so its eigenvalues are the diagonal: <strong>3 and 5</strong>. Its singular values are <strong>6.7082 and 2.2361</strong>. Not similar, not rescaled &mdash; unrelated.</p>
+<div class="scroll"><table>
+<tr><th></th><th>eigendecomposition</th><th>SVD</th></tr>
+<tr><td>equation</td><td>M v = &lambda; v <em>(same vector out)</em></td><td>M v = &sigma; u <em>(a different vector out)</em></td></tr>
+<tr><td>exists for</td><td>square matrices, and not always</td><td><span class="key">every matrix</span>, including non-square</td></tr>
+<tr><td>directions</td><td>generally <em>not</em> perpendicular</td><td>always perpendicular, both sides</td></tr>
+<tr><td>values</td><td>can be negative, or complex</td><td>always real and &ge; 0</td></tr>
+<tr><td>asks</td><td>"which directions are unmoved?"</td><td>"which directions are stretched most?"</td></tr>
+</table></div>
+<p><span class="key">The questions are different, so the answers are.</span> Eigenvectors ask what a matrix leaves pointing the same way &mdash; a question that only makes sense if input and output live in the same space, which is why non-square matrices have no eigenvectors at all. Singular vectors ask what it stretches, which always makes sense.</p>
+</div>
+
+<div class="card green">
+<h3>When they DO coincide &mdash; and why that's the case you usually meet</h3>
+<p>If M is symmetric and positive semi-definite, the two decompositions agree: <span class="inline">&sigma;&#7522; = &lambda;&#7522;</span> and <span class="inline">u&#7522; = v&#7522;</span>. That is the case for covariance matrices, Gram matrices, and every <span class="inline">M&#7488;M</span> &mdash; which is why the two ideas get blurred in practice.</p>
+<p>And the bridge is chapter 2's derivation, now readable as a summary of the whole course:</p>
+<div class="math">
+<span class="line">M&#7488;M  =  (USV&#7488;)&#7488;(USV&#7488;)  =  V S U&#7488; U S V&#7488;  =  <span class="hl">V S&sup2; V&#7488;</span>   <span class="cmt"># U&#7488;U = I</span></span>
+<span class="line">            <span class="cmt">^ an eigendecomposition: eigenvectors V, eigenvalues &sigma;&sup2;</span></span>
+<span class="line"></span>
+<span class="line">MM&#7488;  =  (USV&#7488;)(USV&#7488;)&#7488;  =  U S V&#7488; V S U&#7488;  =  <span class="hl">U S&sup2; U&#7488;</span>   <span class="cmt"># V&#7488;V = I</span></span>
+</div>
+<p><span class="key">So the SVD of M is secretly two eigendecompositions</span> &mdash; V from M&#7488;M, U from MM&#7488;, and one shared set of &sigma;&sup2;. That is precisely the machinery chapter 2 used to compute everything by hand.</p>
+</div>
+
+<div class="card purple">
+<h3>Carry forward</h3>
+<ul>
+<li><span class="key">rank</span> = count of nonzero &sigma;. A zero &sigma; means a crushed direction; an outer product has rank 1.</li>
+<li><span class="key">&kappa; = &sigma;&#8321;/&sigma;&#8345;</span> = how far from circular. It is the optimizer course's ill-conditioning, measured &mdash; and it predicts digits lost.</li>
+<li><span class="key">&sigma;&#7522;&sup2; is a share of the matrix</span>: they sum to &#8214;M&#8214;&sup2;<sub>F</sub>. Ours splits 90% / 10%.</li>
+<li><span class="key">Eckart&ndash;Young</span>: truncating after k terms is the <em>best</em> rank-k approximation, and the error is exactly &sigma;<sub>k+1</sub> &mdash; verified: &#8214;M &minus; A&#8321;&#8214; = 2.236068 = &sigma;&#8322;.</li>
+<li>Fast-decaying spectrum = structure (compressible). Flat spectrum = noise (nothing to throw away).</li>
+<li>SVD &ne; eigendecomposition: for our M, eigenvalues 3 and 5, singular values 6.71 and 2.24. They agree only for symmetric PSD matrices.</li>
+</ul>
+</div>
+<a class="nx" href="4_where_it_shows_up.html">Chapter 4: where you have already been using it &rarr;</a>
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page'),nav=document.getElementById('nav');
+pages.forEach((p,i)=>{const b=document.createElement('button');b.textContent=p.dataset.t;b.onclick=()=>go(i);if(i===0)b.classList.add('on');nav.appendChild(b);});
+function go(n){pages.forEach((p,i)=>p.classList.toggle('on',i===n));nav.querySelectorAll('button').forEach((b,i)=>{b.classList.remove('on');if(i<n)b.classList.add('done');else b.classList.remove('done');if(i===n)b.classList.add('on');});window.scrollTo({top:0,behavior:'smooth'});}
+</script>
+</body>
+</html>

@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LaProp — the division Adam does too late</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:880px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+a.nx{display:inline-block;padding:10px 24px;background:#4caf50;color:#000;border-radius:8px;font-weight:700;font-size:.9em;margin-top:14px;text-decoration:none}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 10px;border:1px solid #333;text-align:left;font-size:.84em}
+th{background:#1a1a3a;color:#4fc3f7}
+td.num{font-family:'Fira Code',Consolas,monospace;text-align:right}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',Consolas,monospace;font-size:.84em;line-height:1.8;overflow-x:auto}
+.math .line{margin:2px 0;display:block;white-space:pre}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.math .kw{color:#c586c0}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math.out{border-left:3px solid #4caf50;background:#0d1a12}
+.outlabel{display:block;font-size:.72em;color:#4caf50;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.key{color:#ffb74d;font-weight:600}
+.inline{font-family:'Fira Code',Consolas,monospace;background:#1a1a2e;border:1px solid #333;border-radius:4px;padding:1px 6px;font-size:.86em;color:#9cdcfe}
+ul{margin-left:20px;margin-top:6px}
+li{margin:4px 0}
+details{margin-top:12px}
+details summary{cursor:pointer;color:#888;font-size:.85em;padding:8px 12px;background:#12122a;border:1px solid #333;border-radius:8px}
+details summary:hover{color:#ccc;border-color:#555}
+details[open] summary{color:#4fc3f7;border-color:#4fc3f7}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+
+<h1>LaProp — the division Adam does too late</h1>
+<p class="sub">Chapter 6. Adam contains one silent design choice: momentum first, divide after. This chapter moves the division — and in doing so shows exactly where Adam can explode, and why its two β knobs were never independent.</p>
+
+<div class="nav" id="nav"></div>
+
+<!-- PAGE 0 -->
+<div class="page on" data-t="0. The ordering">
+<h2>Adam made an ordering choice nobody discusses</h2>
+
+<div class="card blue">
+<h3>Look at Adam's assembly line again — where exactly is the division?</h3>
+<p>Chapter 4's carry-forward ended with a pocket note: <em>m averages raw gradients, and the ÷√v̂ happens at the very end.</em> Write the pipeline as stations:</p>
+<div class="math">
+<span class="line"><span class="cmt"># ADAM: average first, divide after</span></span>
+<span class="line">m  ←  β₁·m + (1−β₁)·<span class="hl">grad</span>            <span class="cmt"># station 1: average RAW gradients</span></span>
+<span class="line">w  ←  w − lr · m̂ <span class="hl">/ (√v̂ + ε)</span>          <span class="cmt"># station 2: divide the AVERAGE by TODAY's yardstick</span></span>
+</div>
+<p>Now notice there was another place the division could have gone — normalize each gradient the moment it arrives, <em>then</em> average:</p>
+<div class="math">
+<span class="line"><span class="cmt"># LAPROP: divide first, average after</span></span>
+<span class="line">m  ←  β₁·m + (1−β₁)·<span class="hl">grad / (√v̂ + ε)</span>   <span class="cmt"># station 1: normalize TODAY's gradient by TODAY's yardstick,</span></span>
+<span class="line">                                        <span class="cmt">#            then average the normalized pushes</span></span>
+<span class="line">w  ←  w − lr · m̂                        <span class="cmt"># station 2: the average IS the step — nothing left to divide</span></span>
+</div>
+<p>Same two memories (v is updated identically in both, β₂ EMA of g², bias-corrected), same cost, same three lines. Only the order of "average" and "divide" swapped. That swap is the whole of <span class="key">LaProp</span> (Ziyin, Wang &amp; Ueda 2020) — the name reads <em>L</em>earning-rate-<em>a</em>djusted <em>Prop</em>agation, RMSProp's division welded onto each gradient before momentum ever sees it.</p>
+</div>
+
+<div class="card">
+<h3>Say what each m means in words — they are not the same object</h3>
+<table>
+<tr><th></th><th>Adam's m</th><th>LaProp's m</th></tr>
+<tr><td>an EMA of</td><td>raw gradients — <em>what the loss said</em>, in gradient units</td><td>normalized steps — <em>what I actually did</em>, in lr units</td></tr>
+<tr><td>units</td><td>gradient units (could be 24, could be 0.024)</td><td>dimensionless, each term already ≈ ±1</td></tr>
+<tr><td>converted to a step by</td><td>dividing by <em>today's</em> √v̂ — old pushes re-priced at today's exchange rate</td><td>nothing — each push was priced the day it happened</td></tr>
+</table>
+<p>The metaphor that survives scrutiny: Adam saves <span class="key">foreign currency</span> and converts the whole stash at whatever today's rate is. LaProp <span class="key">converts each day's pay the day it arrives</span> and saves the converted amount. If the exchange rate never moves, identical. If it moves…</p>
+</div>
+<button class="nx" onclick="go(1)">Next: prove they're identical when the scale holds still</button>
+</div>
+
+<!-- PAGE 1 -->
+<div class="page" data-t="1. When it's the same">
+<h2>First, the honest null result: constant scale ⇒ same optimizer</h2>
+
+<div class="card green">
+<h3>The algebra — one line</h3>
+<p>Suppose √v̂ settles at a constant c (steady gradients — chapter 3's steady state). An EMA is a weighted average, and dividing every term of an average by the same c is the same as dividing the average by c:</p>
+<div class="math">
+<span class="line">LaProp:  m = EMA(g₁/c, g₂/c, …) = <span class="hl">EMA(g₁, g₂, …)/c</span> = Adam's m̂/√v̂</span>
+</div>
+<p>Division and averaging commute when the divisor is constant. So on any problem where each parameter's gradient scale holds still, <span class="key">the ordering is invisible</span>.</p>
+</div>
+
+<div class="card">
+<h3>And the run agrees — to six decimals</h3>
+<div class="math out"><span class="outlabel">output — real run: constant g = 1.0, β₁=0.9, β₂=0.999, both bias-corrected</span>
+<span class="line">  t=1   Adam step/lr = 1.000000   LaProp step/lr = 1.000000   equal=True</span>
+<span class="line">  t=2   Adam step/lr = 1.000000   LaProp step/lr = 1.000000   equal=True</span>
+<span class="line">  t=5   Adam step/lr = 1.000000   LaProp step/lr = 1.000000   equal=True</span>
+</div>
+<p>This is why the ordering went unexamined for years: on calm benchmarks the two are numerically indistinguishable. The difference can only live where <span class="key">the yardstick √v̂ moves</span> — which is exactly late training, distribution shifts, RL, and every β₂ that forgets fast. Next page: make the yardstick move and watch Adam misbehave.</p>
+</div>
+<button class="nx" onclick="go(2)">Next: shrinking gradients — the yardstick moves</button>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page" data-t="2. When Adam explodes">
+<h2>Make the scale move: gradients that shrink as you converge</h2>
+
+<div class="card">
+<h3>The scenario — nothing adversarial about it</h3>
+<p>Gradients shrinking steadily is what convergence <em>looks like</em>. Take g<sub>t</sub> = 0.8ᵗ — each step the gradient is 80% of the last. Now walk what each memory does, remembering chapter 4's horizon rule (memory length ≈ 1/(1−β)):</p>
+<div class="math">
+<span class="line">numerator   m:  β₁ = 0.9  → remembers ~10 steps → still full of OLD, BIG gradients</span>
+<span class="line">denominator v:  β₂ = 0.5  → remembers ~2 steps  → has already FORGOTTEN them</span>
+<span class="line">                                                        </span>
+<span class="line">Adam step = (old big pushes) / (today's small yardstick) = <span class="hl">grows</span></span>
+</div>
+<p>The numerator decays like the <em>gradient 10 steps ago</em>; the denominator decays like <em>today's</em>. Their ratio grows by a factor ≈ β₁/√β₂ every step. For β₁=0.9, β₂=0.5 that's <span class="key">0.9/√0.5 = 1.273 — a 27% larger step every step, forever</span>.</p>
+</div>
+
+<div class="card red">
+<h3>Watch it happen — and watch LaProp not care</h3>
+<div class="math out"><span class="outlabel">output — real run: g = 0.8ᵗ, β₁=0.9, β₂=0.5, bias-corrected, steps in units of lr</span>
+<span class="line">   t= 1   g = 0.800000    Adam:   1.000    LaProp: 1.000</span>
+<span class="line">   t= 5   g = 0.327680    Adam:   1.211    LaProp: 0.859</span>
+<span class="line">   t=10   g = 0.107374    Adam:   1.907    LaProp: 0.767</span>
+<span class="line">   t=15   g = 0.035184    Adam:   3.274    LaProp: 0.720</span>
+<span class="line">   t=20   g = 0.011529    Adam:   5.771    LaProp: 0.694</span>
+<span class="line">   t=25   g = 0.003778    Adam:  <span class="hl">10.274</span>    LaProp: 0.680</span>
+</div>
+<p>Read t=25 twice. The gradient has died to 0.0038 — the landscape is essentially flat — and Adam is taking steps of <span class="key">10× lr and accelerating</span>: the step is ~2,700× the gradient that provoked it. LaProp glides down from 1.0 toward a floor. Nothing about the loss demanded this; it is purely the two memories decaying at mismatched speeds.</p>
+</div>
+
+<div class="card orange">
+<h3>So Adam's two knobs were never independent</h3>
+<p>The growth factor β₁/√β₂ must stay below 1, so Adam is only stable when</p>
+<div class="math"><span class="line">        β₁ ≤ √β₂        <span class="cmt"># Adam's hidden coupling rule</span></span></div>
+<p>Check the presets against it:</p>
+<div class="math out"><span class="outlabel">output — real run: same experiment, default β₂</span>
+<span class="line">  β₁=0.9, β₂=0.999:  β₁/√β₂ = 0.900 &lt; 1  →  Adam decays fine: 1.00 → 0.91 → 0.71 → 0.22</span>
+<span class="line">  β₁=0.9, β₂=0.5  :  β₁/√β₂ = 1.273 &gt; 1  →  the table above</span>
+</div>
+<p>The defaults sit safely inside the rule — that's why you've never seen this. But the rule means <span class="key">you cannot shorten the scale memory without endangering the trend memory</span>: they're one knob wearing two labels. LLM pretraining already walks toward the edge (β₂=0.95 → √β₂ = 0.9747, margin thinning), and any research that wants a fast-forgetting yardstick — noisy rewards, shifting data — is walled off entirely. <em>That</em> is the coupling LaProp's title says it removes.</p>
+<details><summary>Where β₁ ≤ √β₂ comes from — the two-line bound, with numbers</summary>
+<p style="padding:8px 4px">Step 1: one gradient can only be so big relative to its own v. Since v ≥ (1−β₂)·g² (today's contribution alone), <span class="inline">|g|/√v ≤ 1/√(1−β₂)</span> — for β₂=0.5 that's 1.414, for 0.999 it's 31.62. Step 2: Adam's ratio m/√v is a sum of terms (β₁ⁱ·g<sub>t−i</sub>)/√v<sub>t</sub>, and in the worst case v decayed for i steps while β₁ⁱ decayed slower: each term ≤ (β₁/√β₂)ⁱ/√(1−β₂). Geometric series: converges iff β₁/√β₂ &lt; 1, to the bound 1/(√(1−β₂)·(1−β₁/√β₂)) — for the defaults, a finite but loose 317× lr. Above 1, no bound exists, and the 0.8ᵗ run is the constructive proof.</p></details>
+</div>
+<button class="nx" onclick="go(3)">Next: why LaProp is bounded no matter what</button>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page" data-t="3. Why LaProp can't">
+<h2>LaProp's guarantee: bounded for any β₁, β₂ — derived, then observed</h2>
+
+<div class="card green">
+<h3>The derivation is two sentences now</h3>
+<p>Each ingredient entering LaProp's momentum is <em>already normalized by its own contemporary yardstick</em>:</p>
+<div class="math">
+<span class="line">each term:   |g/√v̂|  ≤  1/√(1−β₂)         <span class="cmt"># chapter-3 fact: v holds at least (1−β₂)·g² of TODAY</span></span>
+<span class="line">m = EMA(bounded things)  ≤  the same bound  <span class="cmt"># an average can't exceed its ingredients</span></span>
+<span class="line">step  ≤  lr/√(1−β₂)      for ANY β₁, β₂     <span class="cmt"># β₂=0.5 → 1.414·lr.  No coupling rule needed.</span></span>
+</div>
+<p>Adam's failure needed old gradients re-priced by a new yardstick. LaProp never re-prices: <span class="key">by the time a gradient enters the average it is already a finished, bounded step</span>. The 0.8ᵗ table confirms it: LaProp's column never exceeds 1.000 and settles at 0.68, comfortably under the 1.414 ceiling — with the exact β pair that sent Adam to 10× lr and climbing.</p>
+</div>
+
+<div class="card blue">
+<h3>What the freed knobs buy: LaProp interpolates between two families</h3>
+<p>With the coupling gone, the corners of (β₁, β₂) space become legal — and they're optimizers you already know:</p>
+<div class="math">
+<span class="line">β₂ → 0:   v = g²  →  g/√v̂ = <span class="hl">sign(g)</span>  →  m = EMA of signs = sign descent + momentum</span>
+<span class="line">          <span class="cmt"># chapter 3's "failed first try" — now SAFE, because momentum averages the signs</span></span>
+<span class="line">          <span class="cmt"># (this corner, polished, is the Lion family)</span></span>
+<span class="line">β₁ = 0:   m = today's g/√v̂  →  bias-corrected RMSProp, exactly (= Adam with β₁=0)</span>
+</div>
+<p>Slide β₂ between 0 and 1 and you morph continuously from signed-gradient methods to adaptive methods. Adam cannot make this trip: its version of the β₂→0 corner divides decade-old raw gradients by <em>today's</em> |g| — unbounded, the page-2 disease in its purest form.</p>
+<details><summary>Bias correction in LaProp — same patches, one practical wrinkle</summary>
+<p style="padding:8px 4px">Both memories get the chapter-4 honesty patches: v̂ = v/(1−β₂ᵗ) before the division, and the momentum average is un-shrunk by 1/(1−β₁ᵗ). One wrinkle real implementations handle (timm's <span class="inline">laprop.py</span>): if lr changes over training (warmup, cosine), each buffered term was implicitly priced at <em>its</em> lr — so the buffer stores lr·(normalized step) and the correction tracks an EMA of past lrs rather than the closed form 1−β₁ᵗ. At constant lr the two are identical; the chapter's traces use constant lr.</p></details>
+</div>
+<button class="nx" onclick="go(4)">Next: the map, and what to actually do</button>
+</div>
+
+<!-- PAGE 4 -->
+<div class="page" data-t="4. The map">
+<h2>Where this leaves the course's family tree</h2>
+
+<div class="card blue">
+<h3>Every optimizer so far, one table</h3>
+<table>
+<tr><th>optimizer</th><th>numerator (the push)</th><th>denominator (the yardstick)</th><th>failure it fixed</th></tr>
+<tr><td>SGD (ch. 1)</td><td>today's g</td><td>—</td><td>—</td></tr>
+<tr><td>momentum (ch. 2)</td><td>EMA of g</td><td>—</td><td>zigzag over time</td></tr>
+<tr><td>RMSProp (ch. 3)</td><td>today's g</td><td>√EMA(g²), today's</td><td>1000× scale spread</td></tr>
+<tr><td>Adam (ch. 4)</td><td>EMA of g</td><td>√EMA(g²), <span class="key">applied at the end</span></td><td>both — plus honest young EMAs</td></tr>
+<tr><td>AdamW (ch. 5)</td><td>EMA of g</td><td>same</td><td>decay leaking through the divider</td></tr>
+<tr><td><span class="key">LaProp</span></td><td>EMA of <span class="key">(g ÷ yardstick)</span></td><td>folded into each term</td><td>the β₁–β₂ coupling</td></tr>
+</table>
+</div>
+
+<div class="card orange">
+<h3>Honest practice card</h3>
+<ul>
+<li><span class="key">LaProp did not displace AdamW.</span> At default βs the two run near-identically (page 1), so inertia wins. Its adoption is research-side: noisy objectives, aggressive β₂, optimizer analysis.</li>
+<li>Its lasting value is <span class="key">diagnostic</span>: it isolates the one design decision inside Adam that can blow up — and gives a concise explanation of the failure mode. <em>"Adam's momentum stores raw gradients and re-prices them with today's √v̂; if v forgets faster than m, old pushes get amplified without bound — the fix is normalizing before averaging, which is LaProp."</em></li>
+<li>When you see a loss spike late in training with a lowered β₂, you now have a specific suspect — not "Adam is unstable" but <em>which division, applied when</em>.</li>
+</ul>
+</div>
+
+<div class="card purple">
+<h3>Carry forward</h3>
+<ul>
+<li>Adam = average <em>then</em> divide; LaProp = divide <em>then</em> average. Identical while √v̂ is constant; different exactly when the scale moves.</li>
+<li>Adam's hidden rule: β₁ ≤ √β₂, or steps grow by β₁/√β₂ per step (0.8ᵗ run: 10×lr by t=25, on a dying gradient).</li>
+<li>LaProp's guarantee: every step ≤ lr/√(1−β₂), any βs — bounded because each term is normalized before it's remembered.</li>
+<li>β₂→0 turns LaProp into momentum-of-signs — chapter 3's failed first try, made safe.</li>
+<li>One blind spot still standing, shared by every row of the table: <span class="key">each weight is treated as a lone scalar.</span> A weight <em>matrix</em> has structure none of these can see — that's chapter 7.</li>
+</ul>
+</div>
+<a class="nx" href="7_muon.html">Chapter 7: Muon — stop treating the matrix as a bag of scalars →</a>
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page'),nav=document.getElementById('nav');
+pages.forEach((p,i)=>{
+  const b=document.createElement('button');
+  b.textContent=p.dataset.t;
+  b.onclick=()=>go(i);
+  if(i===0)b.classList.add('on');
+  nav.appendChild(b);
+});
+function go(n){
+  pages.forEach((p,i)=>p.classList.toggle('on',i===n));
+  nav.querySelectorAll('button').forEach((b,i)=>{
+    b.classList.remove('on');
+    if(i<n)b.classList.add('done');
+    else b.classList.remove('done');
+    if(i===n)b.classList.add('on');
+  });
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+</script>
+</body>
+</html>

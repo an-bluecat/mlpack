@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 6: DPO — Skip the Reward Model</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:860px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 12px;border:1px solid #333;text-align:center;font-size:.88em}
+th{background:#1a1a3a;color:#4fc3f7}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',monospace;font-size:.85em;line-height:1.8}
+.math .line{margin:2px 0}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math .cmt{color:#6a9955}
+.scroll{overflow-x:auto}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.key{color:#ffb74d;font-weight:600}
+.vs{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:10px 0}
+.prob-compare{display:grid;grid-template-columns:120px 1fr 64px;gap:8px 10px;align-items:center;margin:12px 0}
+.prob-label{font-size:.82em;color:#aaa;text-align:right}
+.prob-track{height:22px;background:#090916;border:1px solid #333;border-radius:5px;overflow:hidden}
+.prob-fill{height:100%;display:flex;align-items:center;justify-content:flex-end;padding-right:7px;color:#061006;font:700 .72em monospace;min-width:34px}
+.prob-fill.win{background:#4caf50}
+.prob-fill.lose{background:#ef5350;color:#190303}
+.prob-value{font:700 .86em monospace;color:#b5cea8}
+.plain-rule{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin:12px 0}
+.plain-rule .side{border:1px solid #333;border-radius:8px;padding:12px;text-align:center;background:#0d0d20}
+.plain-rule .arrow{color:#ffb74d;font-weight:800}
+@media(max-width:650px){.vs{grid-template-columns:1fr}.plain-rule{grid-template-columns:1fr}.plain-rule .arrow{transform:rotate(90deg)}.prob-compare{grid-template-columns:92px 1fr 52px}.prob-label{font-size:.75em}}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+
+<h1>Chapter 6: DPO</h1>
+<p class="sub">Direct Preference Optimization — skip the reward model, train directly from human choices</p>
+
+<div class="nav" id="nav"></div>
+
+<!-- ============================================================ -->
+<!--  PAGE 0: RLHF RECAP — WHAT DPO REPLACES                    -->
+<!-- ============================================================ -->
+<div class="page on" data-t="0. RLHF Recap">
+<h2>First: What RLHF Actually Does (Concrete)</h2>
+
+<div class="card blue">
+<h3>RLHF is a 3-step pipeline</h3>
+<p>Chapter 5 (pages 4-6) taught this pipeline step by step: preference pairs &rarr; reward model &rarr; PPO with a KL leash. Quick recap with actual data — because DPO's whole pitch is <strong>deleting most of it</strong>:</p>
+</div>
+
+<div class="card">
+<h3>Step 1: Collect human preferences</h3>
+<p>Show a human two responses to the same prompt. They pick the better one.</p>
+<table>
+  <tr><th>Prompt</th><th>Response A</th><th>Response B</th><th>Human picked</th></tr>
+  <tr><td>"Tell me a joke"</td><td>"Why did the chicken cross the road? To get to the other side!"</td><td>"I am an AI and cannot tell jokes."</td><td style="color:#4caf50;font-weight:700">A</td></tr>
+  <tr><td>"What is 2+2?"</td><td>"2+2 is the sum of two and two"</td><td>"4"</td><td style="color:#4caf50;font-weight:700">B</td></tr>
+  <tr><td>"Write a haiku"</td><td>"Roses are red..."</td><td>"Silent winter moon / frost clings to the bare branches / a crow calls at dawn"</td><td style="color:#4caf50;font-weight:700">B</td></tr>
+</table>
+<p style="margin-top:6px;font-size:.85em;color:#888">Typically ~50,000-100,000 of these pairs.</p>
+</div>
+
+<div class="card">
+<h3>Step 2: Train a reward model</h3>
+<p>A separate neural network that takes (prompt, response) and outputs a score:</p>
+<div class="math">
+<div class="line"><span class="lbl">reward_model</span>("Tell me a joke", "Why did the chicken...") → <span class="val">0.82</span></div>
+<div class="line"><span class="lbl">reward_model</span>("Tell me a joke", "I am an AI and cannot...") → <span class="val">0.15</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Trained so that: score(human_preferred) > score(human_rejected)</span></div>
+<div class="line"><span class="cmt">// 0.82 > 0.15 ✓ — matches what the human picked</span></div>
+</div>
+<p>The reward model learns to <strong>imitate the human's taste</strong>. Given any new (prompt, response) pair, it guesses what score the human would give.</p>
+<p style="margin-top:6px;font-size:.88em">(0.82 and 0.15 are readable stand-ins, not probabilities — the RM's head is a bare <code>Linear(4096,1)</code> with no sigmoid, so real scores are any real number, and only the <em>gap</em> between two of them means anything. Ch. 5 tab 4 has the wiring.)</p>
+</div>
+
+<div class="card">
+<h3>Step 3: Run PPO using the reward model as the "environment"</h3>
+<div class="math">
+<div class="line"><span class="cmt">// For each training prompt:</span></div>
+<div class="line"><span class="lbl">prompt</span> = "Tell me a joke"</div>
+<div class="line"><span class="lbl">response</span> = <span class="lbl">LLM</span>.generate(<span class="lbl">prompt</span>)  <span class="cmt">// LLM writes a response</span></div>
+<div class="line"><span class="lbl">reward</span> = <span class="lbl">reward_model</span>(<span class="lbl">prompt</span>, <span class="lbl">response</span>)  <span class="cmt">// → 0.65</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// PPO update (same as Chapter 5):</span></div>
+<div class="line"><span class="cmt">// ratio = new_prob / old_prob</span></div>
+<div class="line"><span class="cmt">// clipped loss = -min(ratio * advantage, clip(ratio) * advantage)</span></div>
+<div class="line"><span class="cmt">// update LLM weights</span></div>
+</div>
+</div>
+
+<div class="card orange">
+<h3>The problem with this pipeline</h3>
+<p>Step 2 (reward model) is a whole separate model you have to train and maintain. It can be:</p>
+<ul style="margin-left:18px;margin-top:4px">
+<li><strong>Wrong</strong> — it might give high scores to responses the human wouldn't actually like</li>
+<li><strong>Exploitable</strong> — the LLM can find weird responses that score high on the reward model but are actually bad ("reward hacking")</li>
+<li><strong>Expensive</strong> — you're training and running two large models instead of one</li>
+</ul>
+<p style="margin-top:8px"><span class="key">DPO's insight:</span> what if we skip step 2 and 3 entirely?</p>
+</div>
+
+<button class="nx" onclick="go(1)">Next: DPO's one new idea &#x2192;</button>
+</div>
+
+<!-- ============================================================ -->
+<!--  PAGE 1: THE ONE IDEA                                        -->
+<!-- ============================================================ -->
+<div class="page" data-t="1. The Idea">
+<h2>DPO: Train Directly on Preferences</h2>
+
+<div class="card blue">
+<h3>The one new concept</h3>
+<p>Instead of:</p>
+<p style="margin:4px 0;font-family:monospace;font-size:.85em;color:#888">preferences → reward model → PPO → updated LLM</p>
+<p>DPO does:</p>
+<p style="margin:4px 0;font-family:monospace;font-size:.85em;color:#4caf50">preferences → updated LLM &nbsp; (directly)</p>
+<p style="margin-top:8px">No reward model. No PPO. No clipping. One training loop.</p>
+</div>
+
+<div class="card">
+<h3>How? Use the LLM itself as the reward model</h3>
+<p>An LLM already assigns probabilities to text. If the LLM says P("Why did the chicken...") = 0.03 and P("I cannot help") = 0.01, then the LLM already "prefers" the chicken joke (higher probability).</p>
+<p style="margin-top:6px">DPO's math proves: <strong>there's a direct formula to go from preference pairs to the optimal LLM update, without ever building a separate reward model.</strong></p>
+</div>
+
+<div class="vs">
+<div class="card red">
+<h3>RLHF (3 steps)</h3>
+<p>1. Collect preferences</p>
+<p>2. Train reward model</p>
+<p>3. Run PPO (generate, score, clip, update)</p>
+<p style="margin-top:6px;font-size:.85em;color:#888">Two models. Sampling in the loop. Hyperparameter-sensitive.</p>
+</div>
+<div class="card green">
+<h3>DPO (1 step)</h3>
+<p>1. Collect preferences</p>
+<p>2. Single supervised-style training loop</p>
+<p style="margin-top:6px;font-size:.85em;color:#888">One model. No sampling in the loop. Simple as fine-tuning.</p>
+</div>
+</div>
+
+<button class="nx" onclick="go(2)">Next: One step, using only probabilities &#x2192;</button>
+</div>
+
+<!-- ============================================================ -->
+<!--  PAGE 2: ONE STEP, RAW PROBABILITIES ONLY                    -->
+<!-- ============================================================ -->
+<div class="page" data-t="2.1 Probabilities Only">
+<h2>One Preference Pair — Only Probabilities</h2>
+
+<div class="card blue">
+<h3>For this whole tab, pretend there are only two possible answers</h3>
+<table>
+<tr><th>Answer</th><th>Human feedback</th></tr>
+<tr><td>“Why did the chicken cross the road?”</td><td style="color:#4caf50;font-weight:700">Winner</td></tr>
+<tr><td>“I cannot help with that.”</td><td style="color:#ef5350;font-weight:700">Loser</td></tr>
+</table>
+<p style="margin-top:8px">That is all standard DPO receives from the human: <strong>the first answer won</strong>. It normally does not receive “winner = 0.9” and “loser = 0.8.”</p>
+</div>
+
+<div class="card orange">
+<h3>Your proposed loss is understandable—but it is not DPO</h3>
+<p>Suppose we happened to ask the human for numeric ratings:</p>
+<div class="math">
+<div class="line">human winner score = <span class="val">0.9</span></div>
+<div class="line">human loser score&nbsp; = <span class="val">0.8</span></div>
+<div class="line">human difference&nbsp;&nbsp; = 0.9 − 0.8 = <span class="val">+0.1</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">current winner probability = <span class="val">0.48</span></div>
+<div class="line">current loser probability&nbsp; = <span class="val">0.52</span></div>
+<div class="line">current difference&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = 0.48 − 0.52 = <span class="val">−0.04</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="hl">your error = +0.1 − (−0.04) = 0.14</span></div>
+</div>
+<p>This could define a custom training rule. But it assumes that human ratings and model probabilities use the same measuring stick. They do not.</p>
+<table>
+<tr><th>Problem</th><th>Concrete reason</th></tr>
+<tr><td>Usually no human scores</td><td>The dataset says only “A beats B.” The number 0.9 was never collected.</td></tr>
+<tr><td>Rating scale is arbitrary</td><td>One rater may write 0.9 vs 0.8; another may mean the same preference with 9 vs 8. Your error changes from 0.14 to 1.04 even though the choice is identical.</td></tr>
+<tr><td>No justified probability target</td><td>A human score gap of 0.1 does not imply that the model’s probability gap should become exactly 0.1.</td></tr>
+</table>
+<p style="margin-top:8px"><strong>Keep the good part of your idea:</strong> compare winner against loser. Drop the unsupported part: treating human ratings as target model probabilities.</p>
+</div>
+
+<div class="card">
+<h3>Why introduce the frozen reference model?</h3>
+<p>Before preference training begins, save a frozen copy. It records the starting probabilities:</p>
+
+<div class="prob-compare" aria-label="Reference and current probabilities for winner and loser">
+  <div class="prob-label">reference winner</div><div class="prob-track"><div class="prob-fill win" style="width:40%">40%</div></div><div class="prob-value">0.40</div>
+  <div class="prob-label">reference loser</div><div class="prob-track"><div class="prob-fill lose" style="width:60%">60%</div></div><div class="prob-value">0.60</div>
+  <div class="prob-label">current winner</div><div class="prob-track"><div class="prob-fill win" style="width:48%">48%</div></div><div class="prob-value">0.48</div>
+  <div class="prob-label">current loser</div><div class="prob-track"><div class="prob-fill lose" style="width:52%">52%</div></div><div class="prob-value">0.52</div>
+</div>
+
+<p>The current model still gives the loser slightly more probability: 0.52 versus 0.48. But compare each answer with where it started:</p>
+<div class="plain-rule">
+  <div class="side"><span style="color:#4caf50;font-weight:700">Winner</span><br>0.40 → 0.48<br><strong>became 1.20× as likely</strong><br><span style="color:#4caf50">20% increase</span></div>
+  <div class="arrow">versus</div>
+  <div class="side"><span style="color:#ef5350;font-weight:700">Loser</span><br>0.60 → 0.52<br><strong>became 0.87× as likely</strong><br><span style="color:#ef5350">about 13% decrease</span></div>
+</div>
+<p>The preference update has moved in the right direction: the winner grew relative to its starting probability, while the loser shrank. It has not finished—the winner is still below the loser—so training should continue.</p>
+</div>
+
+<div class="card green">
+<h3>The probability-only DPO idea</h3>
+<p>For each answer, ask:</p>
+<div class="math">
+<div class="line"><span class="lbl">winner change</span> = current winner probability ÷ reference winner probability</div>
+<div class="line">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = 0.48 ÷ 0.40 = <span class="val">1.20</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="lbl">loser change</span>&nbsp; = current loser probability ÷ reference loser probability</div>
+<div class="line">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = 0.52 ÷ 0.60 = <span class="val">0.87</span></div>
+</div>
+<p style="font-size:1.03em;text-align:center;margin:12px 0"><span class="key">Desired direction:</span> winner’s change should be larger than loser’s change.</p>
+<p>The reference is therefore <strong>not another human score</strong>. It is the model’s frozen “before” picture. DPO asks whether preference training changed the winner more favorably than it changed the loser.</p>
+</div>
+
+<div class="card red">
+<h3>First try at a loss — and the disease it catches</h3>
+<p>We want the winner’s change to beat the loser’s change. Simplest possible loss: their difference.</p>
+<div class="math">
+<div class="line"><span class="lbl">gap</span>&nbsp; = winner change − loser change = 1.20 − 0.87 = <span class="val">+0.33</span></div>
+<div class="line"><span class="lbl">loss</span> = −gap = <span class="val">−0.33</span>&nbsp;&nbsp; <span class="cmt">// training pushes loss down = widens the gap</span></div>
+</div>
+<p>This works — and <strong>never stops working</strong>. The pair stays in the dataset; every epoch pushes the gap wider, forever. That is chapter 5 page 0 all over again: a push with no notion of “done,” grinding the same direction until the model collapses onto a handful of winner phrasings.</p>
+<p style="margin-top:6px">What we actually want: <strong>push hard while the model has the pair backwards, fade to zero once it clearly agrees with the human.</strong></p>
+</div>
+
+<div class="card green">
+<h3>Turn the gap into a belief — and your rule comes back</h3>
+<p>To know when to fade, ask the gap a yes/no question: <em>“how convinced are you that the winner wins?”</em> The <span class="key">sigmoid</span> is the standard converter — it squashes any number into a value between 0 and 1, with 0 mapping to 0.5:</p>
+<div style="overflow-x:auto"><table>
+<tr><th>gap</th><th>−2</th><th>−0.33</th><th>0</th><th>+0.33</th><th>+1.5</th><th>+2.75</th></tr>
+<tr><td><strong>belief = sigmoid(gap)</strong></td><td>0.12</td><td>0.42</td><td>0.50</td><td><strong>0.58</strong></td><td>0.82</td><td>0.94</td></tr>
+</table></div>
+<p style="font-size:.85em;color:#888">(Its formula is 1/(1+e<sup>−gap</sup>) — you never compute it by hand; the table is the behavior. Before training, both changes are 1.0, so gap = 0 and belief = 0.50: “no opinion.” Exactly right for a model that hasn’t seen the pair yet.)</p>
+<p>Now the pieces of your proposed rule snap into place — <strong>in belief space, where both sides finally use the same measuring stick</strong>:</p>
+<div class="math">
+<div class="line"><span class="lbl">target belief</span>&nbsp; = <span class="val">1</span>&nbsp;&nbsp;&nbsp; <span class="cmt">// the human picked the winner — that’s the whole label</span></div>
+<div class="line"><span class="lbl">current belief</span> = sigmoid(+0.33) = <span class="val">0.58</span></div>
+<div class="line"><span class="hl"><span class="lbl">push strength</span> = target − current = 1 − 0.58 = <span class="val">0.42</span></span></div>
+</div>
+<p><span class="key">This IS “human says minus model currently believes”</span> — your rule — just measured on beliefs about <em>who wins</em> (both sides live in 0–1) instead of on raw response probabilities (where a 0.9 rating and a 0.030 product share no scale).</p>
+<p style="margin-top:6px">Watch it fade as training continues on this pair:</p>
+<table>
+<tr><th>training stage</th><th>winner / loser change</th><th>gap</th><th>belief</th><th>push = 1 − belief</th></tr>
+<tr><td>start</td><td>1.00 / 1.00</td><td>0</td><td>0.50</td><td>0.50</td></tr>
+<tr><td>now</td><td>1.20 / 0.87</td><td>+0.33</td><td>0.58</td><td>0.42</td></tr>
+<tr><td>later (suppose 2.0 / 0.5)</td><td>2.0 / 0.5</td><td>+1.5</td><td>0.82</td><td>0.18</td></tr>
+<tr><td>much later (suppose 3.0 / 0.25)</td><td>3.0 / 0.25</td><td>+2.75</td><td>0.94</td><td>0.06</td></tr>
+</table>
+<p>Learned pairs go quiet on their own; a pair the model has <em>backwards</em> (gap −2, belief 0.12) shouts with push 0.88. Same shape as REINFORCE’s (1−p): already-confident → small push.</p>
+<p style="margin-top:6px;font-size:.88em">(The exact recipe on the next tab measures the gap slightly differently — in logs, scaled by β — but the sigmoid and the push rule carry over unchanged.)</p>
+</div>
+
+<div class="card orange">
+<h3>&#x201C;Wait &mdash; why not just put the sigmoid straight on the probabilities?&#x201D;</h3>
+<p>Natural question, and the direction is <strong>completely right</strong>: apply the belief rule directly to the two raw probabilities, no reference model anywhere.</p>
+<div class="math">
+<div class="line">gap    = P(winner) &minus; P(loser) = 0.030 &minus; 0.010 = <span class="val">0.020</span></div>
+<div class="line">belief = sigmoid(0.020) = <span class="val">0.505</span></div>
+<div class="line">push   = 1 &minus; 0.505 = <span class="val">0.495</span></div>
+</div>
+<p style="margin-top:6px">Winner goes up, loser goes down &mdash; exactly as intended. The failure is not the direction, it is the <strong>size</strong>. Whole-response probabilities are tiny, so their difference is tiny, so the belief is pinned at &#x201C;no opinion&#x201D; no matter what the model actually thinks.</p>
+<p style="margin-top:6px">And it cannot escape, because probabilities live in 0&ndash;1. Take the most extreme case that could ever exist:</p>
+<div class="math">
+<div class="line"><span class="cmt">// perfect confidence: winner at 1.0, loser at 0.0</span></div>
+<div class="line">gap    = 1.0 &minus; 0.0 = 1.0</div>
+<div class="line">belief = sigmoid(1.0) = <span class="val">0.731</span>   <span class="cmt">// the absolute ceiling</span></div>
+<div class="line">push   = <span class="val">0.269</span>                   <span class="cmt">// the absolute floor</span></div>
+</div>
+<p style="margin-top:6px">So belief is trapped between <strong>0.269 and 0.731</strong>. Two consequences, both bad:</p>
+<ul style="margin-left:18px;margin-top:4px">
+<li>The model can never express certainty &mdash; 73% is the most conviction the loss can ever read off it.</li>
+<li>The push never fades below 0.269, so <em>every pair keeps shouting forever</em>. That destroys the self-weighting behaviour this tab just built, where solved pairs go quiet on their own.</li>
+</ul>
+<p style="margin-top:6px">Now compare the reference-ratio version from the cards above: winner 1.20&times; vs loser 0.87&times; gave gap 0.33 and belief 0.58 &mdash; and as training proceeds (2.0 vs 0.5) the gap reaches 1.5 and belief 0.82, with no ceiling at all. <span class="key">A ratio is unbounded; a probability difference is not.</span> That is the real reason the comparison is built from ratios.</p>
+<p style="margin-top:6px;font-size:.88em">There <em>is</em> a way to rescue your version &mdash; measure the responses on a log scale instead of a raw one, which unbounds the gap. That turns out to be a real, published family of methods; the next tab shows the step, and <a href="14_simpo.html" style="color:#4fc3f7">chapter 14</a> is the method built on exactly it.</p>
+</div>
+
+<div class="card purple">
+<h3>Stop here before the compact formula</h3>
+<p>You now have the complete idea without new mathematical machinery:</p>
+<p style="margin-top:6px">1. Human says which response won.<br>2. Reference model stores both starting probabilities.<br>3. Current model produces both current probabilities.<br>4. Measure how much each response changed from its own starting point.<br>5. gap = winner’s change minus loser’s change.<br>6. sigmoid turns the gap into a belief (0–1) that the winner wins.<br>7. Push with strength = 1 − belief: hard while the model disagrees with the human, fading to zero as it agrees.</p>
+<p style="margin-top:8px">The next tab changes the arithmetic into the numerically stable form used by real code. It should be read as a translation of these seven steps—not as a new idea.</p>
+</div>
+
+<button class="nx" onclick="go(3)">Next: Translate this into the exact loss &#x2192;</button>
+</div>
+
+<!-- ============================================================ -->
+<!--  PAGE 3: EXACT ONE-STEP WORKED EXAMPLE                       -->
+<!-- ============================================================ -->
+<div class="page" data-t="2.2 Exact Math">
+<h2>The Same Step — Now Translate It Into the Exact DPO Loss</h2>
+
+<div class="card orange">
+<h3>What this tab adds — and what it does not</h3>
+<p>Tab 2.1 already settled the <em>idea</em>: compare the winner’s current-vs-reference change against the loser’s, and push with strength 1 − belief. None of that changes here.</p>
+<p style="margin-top:6px">This tab adds exactly <strong>one new thing</strong>: the ratios from tab 2.1 cannot be fed to the loss as they stand, because the loss <em>subtracts</em> the two scores and raw ratios are lopsided under subtraction. Fixing that is where the <code>log</code> comes from — earned in the "where the score comes from" card below, not assumed. Everything else on this tab is arithmetic on numbers you have already seen.</p>
+</div>
+
+<div class="card blue">
+<h3>Setup</h3>
+<p>We have one preference pair:</p>
+<table>
+<tr><th>Prompt</th><th>Winner (y<sub>w</sub>)</th><th>Loser (y<sub>l</sub>)</th></tr>
+<tr><td>"Tell me a joke"</td><td style="color:#4caf50">"Why did the chicken cross the road?"</td><td style="color:#ef5350">"I cannot help with that."</td></tr>
+</table>
+<p style="margin-top:6px">We also need a <strong>reference model</strong> — a frozen copy of the LLM from before training started. This prevents the LLM from changing too much (same idea as PPO's clipping, just done differently).</p>
+</div>
+
+<div class="card">
+<h3>Step 0: What is "the probability of a whole response"?</h3>
+<p>An LLM outputs a probability for <strong>one token at a time</strong>. A whole response's probability is the <strong>product</strong> of its tokens' probabilities, each conditioned on everything before it:</p>
+<div class="math">
+<div class="line"><span class="cmt">// response tokenized: ["Why", " did", " the", ...]</span></div>
+<div class="line">P(response | prompt) = P("Why"|prompt) × P(" did"|prompt+"Why") × P(" the"|prompt+"Why did") × ...</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// tiny 3-token example:</span></div>
+<div class="line">0.5 × 0.3 × 0.2 = <span class="val">0.030</span>   <span class="cmt">// ← this is where a number like 0.030 comes from</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// in code you work in log space — the product becomes a SUM:</span></div>
+<div class="line">log P(response) = log(0.5) + log(0.3) + log(0.2)</div>
+<div class="line">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = −0.693 − 1.204 − 1.609 = <span class="val">−3.507</span>   <span class="cmt">// = log(0.030) ✓</span></div>
+</div>
+<details class="more"><summary>Refresher: reading logs — "what day is it?"</summary>
+
+<p style="margin-top:8px"><strong>Step 1 — start with base 2, and forget <code>e</code> entirely.</strong> One bacterium on day 0. It <em>doubles every day</em>. Then <code>log₂(x)</code> asks one question: <span class="key">"I see x bacteria — what day is it?"</span></p>
+<div style="overflow-x:auto"><table>
+<tr><th>day</th><td>0</td><td>1</td><td>2</td><td>3</td><td>4</td></tr>
+<tr><th>amount</th><td>1</td><td>2</td><td>4</td><td>8</td><td>16</td></tr>
+<tr><th>log₂</th><td>0</td><td>1</td><td>2</td><td>3</td><td>4</td></tr>
+</table></div>
+<p style="margin-top:6px">That's the whole definition: <code>log₂(8) = 3</code> because 8 is what you have on day 3.</p>
+
+<p style="margin-top:10px"><strong>Step 2 — fractions are days BEFORE day 0.</strong> Run the film backwards; it halves each day:</p>
+<div style="overflow-x:auto"><table>
+<tr><th>day</th><td>−3</td><td>−2</td><td>−1</td><td>0</td></tr>
+<tr><th>amount</th><td>1/8</td><td>1/4</td><td>1/2</td><td>1</td></tr>
+<tr><th>log₂</th><td>−3</td><td>−2</td><td>−1</td><td>0</td></tr>
+</table></div>
+<p style="margin-top:6px">So <code>log₂(1/8) = −3</code> — <em>three</em> days before, not eight. (Count the halvings: ½, ¼, ⅛.) A negative log just means "before the starting day," i.e. the amount is below 1.</p>
+
+<p style="margin-top:10px"><strong>Step 3 — in-between amounts are mid-day.</strong> 10 isn't a power of 2; it sits between day 3 (=8) and day 4 (=16):</p>
+<div class="math">
+<div class="line">log₂(10) = <span class="val">3.32</span>&nbsp;&nbsp; <span class="cmt">// a third of the way into day 3</span></div>
+</div>
+
+<p style="margin-top:10px"><strong>Step 4 — why huge numbers give small answers.</strong> Say it in days and the strangeness disappears:</p>
+<div class="math">
+<div class="line">log₂(1,000)&nbsp;&nbsp;&nbsp;&nbsp; ≈ <span class="val">10</span> days&nbsp;&nbsp; <span class="cmt">// 2¹⁰ = 1024</span></div>
+<div class="line">log₂(1,000,000) ≈ <span class="val">20</span> days&nbsp;&nbsp; <span class="cmt">// 2²⁰ = 1,048,576</span></div>
+<div class="line">log₂(0.001)&nbsp;&nbsp;&nbsp;&nbsp; ≈ <span class="val">−10</span> days&nbsp; <span class="cmt">// ten days BEFORE day 0</span></div>
+</div>
+<p style="margin-top:6px">A thousand times bigger costs only 10 more days — the growth is exponential, so the <em>calendar</em> barely moves. Logs are small because days are cheap.</p>
+
+<p style="margin-top:10px"><strong>Step 5 — and here is why products become sums.</strong> Multiplying amounts = <em>adding days</em>:</p>
+<div class="math">
+<div class="line">8 is day <span class="val">3</span>,&nbsp; 4 is day <span class="val">2</span></div>
+<div class="line">8 × 4 = 32 &nbsp;→&nbsp; day <span class="val">3 + 2 = 5</span>&nbsp;&nbsp; <span class="cmt">// 2⁵ = 32 ✓</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// "multiply by 4" = "wait 2 more days". Always.</span></div>
+<div class="line">log(a × b) = log(a) + log(b)</div>
+</div>
+<p style="margin-top:6px">That rule is exactly why the <em>product</em> of token probabilities above becomes a <em>sum</em> of logs.</p>
+
+<p style="margin-top:10px"><strong>Step 6 — now change the clock. That is all a "base" is.</strong> Base 2 = doubles per day; base 10 = ×10 per day:</p>
+<div class="math">
+<div class="line">log₁₀(1,000) = <span class="val">3</span> days&nbsp;&nbsp; <span class="cmt">// 10 → 100 → 1000</span></div>
+<div class="line">log₁₀(0.001) = <span class="val">−3</span> days</div>
+</div>
+<p style="margin-top:6px">Same story, faster clock — so fewer days for the same amount. The base only sets how big one "day" is.</p>
+
+<p style="margin-top:10px"><strong>Step 7 — <code>ln</code> is that same clock with base <code>e</code> ≈ 2.718.</strong> Why such a strange number? Because this one doesn't jump at midnight — it grows <em>continuously</em>, at every instant gaining 100% of its current size per unit time. Run that from 1 for one full time unit and you land on 2.718; that <em>is</em> what <code>e</code> means. So:</p>
+<div class="math">
+<div class="line"><span class="key">ln(x) = how much TIME does continuous growth need to get from 1 to x?</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">ln(1)&nbsp;&nbsp;&nbsp;&nbsp; = <span class="val">0</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class="cmt">// already there</span></div>
+<div class="line">ln(2)&nbsp;&nbsp;&nbsp;&nbsp; = <span class="val">0.693</span>&nbsp; <span class="cmt">// doubling takes 0.693 time units...</span></div>
+<div class="line">ln(2.718) = <span class="val">1</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class="cmt">// ...and one FULL unit overshoots to 2.718</span></div>
+<div class="line">ln(10)&nbsp;&nbsp;&nbsp; = <span class="val">2.303</span></div>
+<div class="line">ln(0.5)&nbsp;&nbsp; = <span class="val">−0.693</span> <span class="cmt">// same trip, backwards</span></div>
+</div>
+<p style="margin-top:6px">Note doubling costs <em>less</em> than one time unit (0.693, not 1) — continuous compounding arrives before the once-a-day version does.</p>
+
+<p style="margin-top:10px"><strong>The payoff — near 1, ln(x) IS the percent change.</strong> At x = 1 the growth rate is exactly 1 per unit time, so gaining 1% takes about 0.01 of a time unit:</p>
+<div class="math">
+<div class="line">ln(1.01) = <span class="val">0.00995</span> ≈ +1%</div>
+<div class="line">ln(1.05) = <span class="val">0.0488</span>&nbsp; ≈ +5%</div>
+<div class="line">ln(1.20) = <span class="val">0.182</span>&nbsp;&nbsp; ≈ +20%  <span class="cmt">// ~9% low by here, still readable</span></div>
+</div>
+<p style="margin-top:6px">And that last line is <em>this chapter</em>: Step 2's <code>log_ratio_w = +0.182</code> is just 0.030/0.025 = 1.20 — the winner became <strong>1.20× as likely</strong>, the exact 20% increase from tab 2.1. Same fact, different clothes. (The loser's −0.182 is 1/1.2 — the same trip backwards.)</p>
+<p style="margin-top:10px"><strong>Four anchors rebuild every number in this chapter</strong>, using log(a×b) = log a + log b from Step 5:</p>
+<div class="math">
+<div class="line">ln 1 = <span class="val">0</span>&nbsp;&nbsp;&nbsp; ln 2 = <span class="val">0.693</span>&nbsp;&nbsp;&nbsp; ln 3 = <span class="val">1.099</span>&nbsp;&nbsp;&nbsp; ln 10 = <span class="val">2.303</span> <span class="cmt">// so ln 100 = 4.605</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">ln 0.030 = ln 3 − ln 100 = 1.099 − 4.605 = <span class="val">−3.507</span> <span class="cmt">// ✓ Step 0</span></div>
+<div class="line">ln 0.025 = ln 2.5 − ln 100 = 0.916 − 4.605 = <span class="val">−3.689</span> <span class="cmt">// ln2.5 = ln5 − ln2</span></div>
+<div class="line">ln 0.010 = &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;− ln 100 = <span class="val">−4.605</span></div>
+<div class="line">ln 0.012 = ln 1.2 − ln 100 = 0.182 − 4.605 = <span class="val">−4.423</span></div>
+</div>
+<p style="margin-top:6px">A probability is always below 1, so its log is always a <em>negative</em> time — how far back before day 0 you would have to start. A 30-token response at ~10⁻⁹ sits at −20.7: comfortably readable, instead of underflowing to zero as a raw product.</p>
+<p style="margin-top:10px"><strong>The deep reason every loss here uses logs:</strong> a log turns a <em>ratio</em> (asymmetric, lives in 0→∞, with 1 as an awkward middle) into a <em>difference</em> (symmetric, −∞→∞, with 0 as the natural middle) — comparing two amounts multiplicatively becomes subtracting two clock readings. Bradley-Terry, DPO, and the PPO ratio all compare two quantities multiplicatively; the log is what makes that a plain subtraction the optimizer can work with.</p>
+</details>
+<p style="margin-top:6px;font-size:.88em">Keep that −3.507 in mind — it shows up again in Step 2. Long responses have tiny products (30 tokens at ~0.5 each ≈ 10<sup>−9</sup>), which is exactly why everything runs in log space.</p>
+</div>
+
+<div class="card">
+<h3>Step 1: Get probabilities from both models</h3>
+<p>Both the current LLM and the frozen reference assign a probability to each response:</p>
+<div class="math">
+<div class="line"><span class="cmt">// Current model (the one we're training):</span></div>
+<div class="line"><span class="lbl">P_current</span>("Why did the chicken..." | prompt) = <span class="val">0.030</span></div>
+<div class="line"><span class="lbl">P_current</span>("I cannot help..." | prompt)      = <span class="val">0.010</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Reference model (frozen, never changes):</span></div>
+<div class="line"><span class="lbl">P_ref</span>("Why did the chicken..." | prompt)     = <span class="val">0.025</span></div>
+<div class="line"><span class="lbl">P_ref</span>("I cannot help..." | prompt)          = <span class="val">0.012</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3>Step 2: Compute log-ratios</h3>
+<p>"How much more does the current model like this response compared to the reference?"</p>
+<div class="math">
+<div class="line"><span class="cmt">// For the winner:</span></div>
+<div class="line"><span class="lbl">log_ratio_w</span> = log(0.030) - log(0.025)</div>
+<div class="line">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = -3.507 - (-3.689)</div>
+<div class="line">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = <span class="val">+0.182</span> <span class="cmt">// current model likes winner MORE than ref does ✓</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// For the loser:</span></div>
+<div class="line"><span class="lbl">log_ratio_l</span> = log(0.010) - log(0.012)</div>
+<div class="line">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = -4.605 - (-4.423)</div>
+<div class="line">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = <span class="val">-0.182</span> <span class="cmt">// current model likes loser LESS than ref does ✓</span></div>
+</div>
+<p style="margin-top:8px">Why is subtracting two logs called a "log-<em>ratio</em>"? Because it <em>is</em> one — dividing is the mirror of the rule from Step 0's refresher (multiply → add, so divide → subtract):</p>
+<div class="math">
+<div class="line">log(a) − log(b) = log( a / b )</div>
+<div class="line">&nbsp;</div>
+<div class="line">log(0.030) − log(0.025) = log( 0.030/0.025 ) = log(<span class="val">1.20</span>) = <span class="val">+0.182</span></div>
+<div class="line"><span class="cmt">// ← the winner is 1.20× as likely as before: tab 2.1's exact number</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3>The four numbers in one picture — where each one flows</h3>
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" style="display:block;margin:0 auto">
+  <defs>
+    <marker id="d6a" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6" fill="none" stroke="#888" stroke-width="1.4"/></marker>
+  </defs>
+  <!-- winner row -->
+  <text x="20" y="52" fill="#4caf50" font-size="12" font-weight="600">WINNER</text>
+  <rect x="20" y="62" width="128" height="50" rx="8" fill="#0d1b2a" stroke="#4fc3f7"/>
+  <text x="84" y="83" fill="#4fc3f7" font-size="11" text-anchor="middle">current model &pi;_&theta;</text>
+  <text x="84" y="101" fill="#b5cea8" font-size="12" text-anchor="middle" font-family="monospace">P = 0.030</text>
+  <rect x="168" y="62" width="128" height="50" rx="8" fill="#12122a" stroke="#888"/>
+  <text x="232" y="83" fill="#aaa" font-size="11" text-anchor="middle">frozen reference</text>
+  <text x="232" y="101" fill="#b5cea8" font-size="12" text-anchor="middle" font-family="monospace">P = 0.025</text>
+  <rect x="356" y="62" width="132" height="50" rx="8" fill="#0a1a0a" stroke="#4caf50"/>
+  <text x="422" y="83" fill="#4caf50" font-size="11" text-anchor="middle">log(0.030/0.025)</text>
+  <text x="422" y="101" fill="#4caf50" font-size="13" text-anchor="middle" font-family="monospace" font-weight="700">+0.182</text>
+  <path d="M148,87 L164,87" stroke="#888" stroke-width="1.3" fill="none"/>
+  <path d="M296,87 L352,87" stroke="#888" stroke-width="1.3" fill="none" marker-end="url(#d6a)"/>
+  <!-- loser row -->
+  <text x="20" y="192" fill="#ef5350" font-size="12" font-weight="600">LOSER</text>
+  <rect x="20" y="202" width="128" height="50" rx="8" fill="#0d1b2a" stroke="#4fc3f7"/>
+  <text x="84" y="223" fill="#4fc3f7" font-size="11" text-anchor="middle">current model &pi;_&theta;</text>
+  <text x="84" y="241" fill="#b5cea8" font-size="12" text-anchor="middle" font-family="monospace">P = 0.010</text>
+  <rect x="168" y="202" width="128" height="50" rx="8" fill="#12122a" stroke="#888"/>
+  <text x="232" y="223" fill="#aaa" font-size="11" text-anchor="middle">frozen reference</text>
+  <text x="232" y="241" fill="#b5cea8" font-size="12" text-anchor="middle" font-family="monospace">P = 0.012</text>
+  <rect x="356" y="202" width="132" height="50" rx="8" fill="#1a0a0a" stroke="#ef5350"/>
+  <text x="422" y="223" fill="#ef5350" font-size="11" text-anchor="middle">log(0.010/0.012)</text>
+  <text x="422" y="241" fill="#ef5350" font-size="13" text-anchor="middle" font-family="monospace" font-weight="700">&minus;0.182</text>
+  <path d="M148,227 L164,227" stroke="#888" stroke-width="1.3" fill="none"/>
+  <path d="M296,227 L352,227" stroke="#888" stroke-width="1.3" fill="none" marker-end="url(#d6a)"/>
+  <!-- gap node -->
+  <rect x="530" y="132" width="120" height="56" rx="8" fill="#1a0a2a" stroke="#ce93d8"/>
+  <text x="590" y="152" fill="#ce93d8" font-size="11" text-anchor="middle">gap = &beta; &times; (w &minus; l)</text>
+  <text x="590" y="170" fill="#b5cea8" font-size="12" text-anchor="middle" font-family="monospace">0.1 &times; 0.364</text>
+  <text x="590" y="184" fill="#ce93d8" font-size="11" text-anchor="middle" font-family="monospace">= 0.036</text>
+  <path d="M488,95 C516,105 528,120 542,130" stroke="#888" stroke-width="1.3" fill="none" marker-end="url(#d6a)"/>
+  <path d="M488,220 C516,210 528,196 542,188" stroke="#888" stroke-width="1.3" fill="none" marker-end="url(#d6a)"/>
+  <!-- sigmoid + loss -->
+  <rect x="530" y="238" width="200" height="52" rx="8" fill="#1a1400" stroke="#ff9800"/>
+  <text x="630" y="259" fill="#ff9800" font-size="11" text-anchor="middle">loss = &minus;log(sigmoid(gap))</text>
+  <text x="630" y="277" fill="#b5cea8" font-size="12" text-anchor="middle" font-family="monospace">&minus;log(0.509) = 0.675</text>
+  <path d="M590,188 L590,234" stroke="#888" stroke-width="1.3" fill="none" marker-end="url(#d6a)"/>
+  <!-- annotation -->
+  <text x="180" y="152" fill="#888" font-size="10">two FORWARD passes per response,</text>
+  <text x="180" y="166" fill="#888" font-size="10">no generation anywhere</text>
+</svg>
+<p style="margin-top:8px;font-size:.9em">Follow one row: the same response is scored by the trainable model and the frozen reference, and only their <em>ratio</em> survives — "how much has my opinion of this response moved since training began?" The sigmoid node is tab 2.1's belief converter, unchanged. The winner's movement (+0.182) and the loser's movement (−0.182) then fight in the gap: the loss only goes down if the winner's ratio <em>outgrows</em> the loser's. Nothing is generated anywhere in this picture — that's why DPO is off-policy (chapter 9) and why it's so cheap.</p>
+</div>
+
+<div class="card purple">
+<h3>Before the loss: where the score comes from (and why it grows a log)</h3>
+
+<p><strong>Notation first.</strong> <code>y</code> is standard shorthand for <em>one response</em> — a sentence. So <code>score(y)</code> means "the score of that response," and we compute it twice per pair: <code>score(winner)</code> and <code>score(loser)</code>. Nothing else hides in <code>y</code>.</p>
+
+<p style="margin-top:10px"><strong>What we need.</strong> Chapter 5's loss takes exactly one number per response:</p>
+<div class="math">
+<div class="line">loss = −log( sigmoid( <span class="lbl">score(winner)</span> − <span class="lbl">score(loser)</span> ) )   <span class="cmt">// Bradley-Terry</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// In ch. 5 that number was RM(y): the output of a separate network's</span></div>
+<div class="line"><span class="cmt">// Linear(4096,1) head. A raw, unbounded number. NO log anywhere.</span></div>
+<div class="line"><span class="cmt">// DPO deletes that network. So: which number from the LLM replaces it?</span></div>
+</div>
+
+<p style="margin-top:10px"><strong>Attempt 1 — just use the probability.</strong> <code>score(y) = P_current(y)</code>. The LLM already produces it, so try it:</p>
+<div class="math">
+<div class="line">score(winner) = <span class="val">0.030</span>,&nbsp; score(loser) = <span class="val">0.010</span>&nbsp;&nbsp; <span class="cmt">// gap = 0.020</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// BROKEN — it measures length and phrasing, not quality:</span></div>
+<div class="line"><span class="cmt">//   short, bland reply (4 tokens)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; P ≈ 0.010</span></div>
+<div class="line"><span class="cmt">//   long, excellent reply (30 tokens)&nbsp; P ≈ 0.000000001</span></div>
+<div class="line"><span class="cmt">// The good answer scores ~10 million times WORSE purely for being</span></div>
+<div class="line"><span class="cmt">// longer — every extra token multiplies in another number &lt; 1.</span></div>
+</div>
+
+<p style="margin-top:10px"><strong>Attempt 2 — compare each response against ITSELF.</strong> This is tab 2.1&#x2019;s move, and it kills attempt 1&#x2019;s length problem outright: put the same sentence on top and bottom, and whatever made it long or unusual divides out. Give the two ratios short names, because we are about to differentiate them:</p>
+<div class="math">
+<div class="line"><span class="lbl">W</span> = P_cur(winner) / P_ref(winner) = 0.030 / 0.025 = <span class="val">1.20</span>   <span class="cmt">// winner got 1.20&times; likelier</span></div>
+<div class="line"><span class="lbl">R</span> = P_cur(loser)&nbsp; / P_ref(loser)&nbsp; = 0.010 / 0.012 = <span class="val">0.83</span>   <span class="cmt">// loser got 0.83&times; as likely</span></div>
+</div>
+
+<p style="margin-top:10px"><strong>So put those straight into chapter 5&#x2019;s loss and see what happens.</strong> No log anywhere yet &mdash; just the ratios:</p>
+<div class="math">
+<div class="line">z = W &minus; R = 1.20 &minus; 0.83 = <span class="val">0.37</span></div>
+<div class="line"><span class="hl">Loss = &minus;ln sigmoid(z)</span></div>
+</div>
+<p style="margin-top:6px">This is a perfectly reasonable proposal, and you cannot tell whether it works by looking at it. Chapter 5&#x2019;s first principle: <strong>the optimizer never reads the loss, only its derivative.</strong> So differentiate it.</p>
+
+<p style="margin-top:10px"><strong>Differentiate, part 1 &mdash; the easy links.</strong></p>
+<div class="math">
+<div class="line"><span class="cmt">// outer link (chapter 5 derived this one):</span></div>
+<div class="line">   dLoss / dz = &minus;( 1 &minus; sigmoid(z) ) = &minus;(1 &minus; 0.591) = <span class="val">&minus;0.409</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// inner link: z contains R = P_cur(loser)/P_ref(loser), and</span></div>
+<div class="line"><span class="cmt">// P_ref(loser) is a frozen constant divisor, so:</span></div>
+<div class="line">   dz / d P_cur(loser) = &minus;1 / P_ref(loser) = &minus;1 / 0.012</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// multiply them:</span></div>
+<div class="line">   dLoss / d P_cur(loser) = 0.409 / 0.012 = <span class="val">+34.1</span></div>
+</div>
+<p style="margin-top:6px">Positive, so gradient descent <em>lowers</em> the loser&#x2019;s probability. Correct direction &mdash; nothing is broken yet.</p>
+
+<div class="card blue" style="margin-top:12px">
+<h3>Stop &mdash; "how big is that push?" does not have an answer yet</h3>
+<p><code>34.1</code> is a big-looking number, but big compared to what? Before we can call this push weak or strong we have to decide <em>what variable we are measuring the push on</em>. That sounds like a technicality. It is not: the two obvious choices give <strong>opposite answers</strong> about which response is being pushed harder. So this step has to be settled properly.</p>
+
+<p style="margin-top:10px"><strong>Step 1 &mdash; the only thing that ultimately matters is the gradient on the weights.</strong> <code>dLoss/d&theta;</code>. Probabilities do not move on their own; weights move, and everything else follows.</p>
+
+<p style="margin-top:8px"><strong>Step 2 &mdash; write that gradient out.</strong> Here is the key structural fact: <em>both</em> candidate losses depend on &theta; only through the two log-probabilities. (Obvious for the log version. True for the raw-ratio version too, because <code>P_cur = e^(log P_cur)</code>.) So the chain rule always produces this shape:</p>
+<div class="math">
+<div class="line">dLoss/d&theta;  =  <span class="hl">c_w</span> &middot; &nabla;<sub>&theta;</sub> log P(winner)  +  <span class="hl">c_l</span> &middot; &nabla;<sub>&theta;</sub> log P(loser)</div>
+</div>
+
+<p style="margin-top:8px"><strong>Step 3 &mdash; the &nabla; terms are not yours to choose.</strong> <code>&nabla;<sub>&theta;</sub> log P(y)</code> is fixed by the network&#x2019;s weights and by which tokens response <code>y</code> happens to contain. No choice of loss function can change them.</p>
+
+<p style="margin-top:8px"><strong>Step 4 &mdash; therefore the loss&#x2019;s entire influence is those two scalars.</strong> <code>c_w</code> and <code>c_l</code> are the whole of your design; everything else in the gradient is the network being itself. And by definition:</p>
+<div class="math">
+<div class="line">c = dLoss / d( log P )</div>
+</div>
+<p style="margin-top:6px"><span class="key">That is the answer to "why log P and not P".</span> The log-probability gradient is not a convention or a convenience &mdash; it is precisely the coefficient the loss contributes, isolated from the network&#x2019;s fixed structure. Measuring in probability space instead gives you <code>dLoss/dP = c / P</code>, which multiplies your design choice by the response&#x2019;s own probability and therefore <em>hides</em> the very thing you are trying to inspect.</p>
+
+<p style="margin-top:10px"><strong>And this is not cosmetic &mdash; the two currencies disagree about who wins.</strong> Same loss, same numbers:</p>
+<div class="scroll"><table>
+<tr><th>measured on</th><th>push on winner</th><th>push on loser</th><th>verdict</th></tr>
+<tr><td>probability, <code>dLoss/dP</code></td><td>0.409 &times; 1/0.025 = <strong>16.4</strong></td><td>0.409 &times; 1/0.012 = <strong>34.1</strong></td><td style="color:#ef5350">loser pushed 2.08&times; harder</td></tr>
+<tr><td>log-probability, <code>dLoss/d(log P)</code></td><td>0.409 &times; W = <strong>0.491</strong></td><td>0.409 &times; R = <strong>0.341</strong></td><td style="color:#4caf50">winner pushed 1.44&times; harder</td></tr>
+</table></div>
+<p style="margin-top:6px">Exactly opposite conclusions. The log-probability row is the true one, because those two numbers are the <code>c</code> values from step 2 &mdash; the actual weights the loss puts on each response&#x2019;s contribution to <code>d&theta;</code>. The probability row is the same information smeared by a factor of <code>P</code>, which differs between the two responses and so scrambles the comparison.</p>
+
+<details class="more"><summary>Supporting intuition: why probability is a bad ruler in the first place</summary>
+<p style="margin-top:8px">Independently of the argument above, absolute probability changes are simply not comparable across responses:</p>
+<div class="scroll"><table>
+<tr><th>the move</th><th>absolute change</th><th>multiplicative change</th></tr>
+<tr><td>0.010 &rarr; 0.012</td><td>+0.002</td><td>&times;1.2</td></tr>
+<tr><td>0.500 &rarr; 0.600</td><td>+0.100</td><td>&times;1.2</td></tr>
+</table></div>
+<p style="margin-top:6px">Same &times;1.2, <strong>50&times; different</strong> in absolute terms. Money is the familiar version: a $1,000 raise means everything at a $20,000 salary and nothing at $2,000,000, which is why nobody quotes raises in dollars. Logs are the ruler on which equal <em>factors</em> are equal <em>distances</em> &mdash; the "what day is it?" refresher on this tab, where every doubling is one same-sized step.</p>
+</details>
+</div>
+
+<p style="margin-top:10px"><strong>The conversion, made concrete.</strong> Since <code>P = e^(log P)</code>, differentiating an exponential returns itself: <code>dP / d(log P) = P</code>. Check it by hand at P = 0.010:</p>
+<div class="math">
+<div class="line">log P = &minus;4.605&nbsp; &rarr;&nbsp; P = 0.01000</div>
+<div class="line">nudge log P up by 0.01, to &minus;4.595&nbsp; &rarr;&nbsp; P = 0.01010</div>
+<div class="line">&nbsp;</div>
+<div class="line">&Delta;P / &Delta;(log P) = 0.000100 / 0.01 = <span class="val">0.0100</span> = P&nbsp;&nbsp; <span class="cmt">// ✓</span></div>
+</div>
+
+<p style="margin-top:10px"><strong>Differentiate, part 2 &mdash; convert the push into that currency.</strong> Multiply by <code>P_cur(loser)</code>:</p>
+<div class="math">
+<div class="line">dLoss / d( log P_cur(loser) ) = 34.1 &times; 0.010 = <span class="val">+0.341</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// and in symbols, watch what the two factors collapse into:</span></div>
+<div class="line">   ( 1&minus;sigmoid(z) ) / P_ref(loser)  &times;  P_cur(loser)</div>
+<div class="line"> = ( 1&minus;sigmoid(z) ) &times; <span class="hl">P_cur(loser) / P_ref(loser)</span></div>
+<div class="line"> = ( 1&minus;sigmoid(z) ) &times; <span class="hl">R</span>&nbsp;&nbsp;&nbsp; = 0.409 &times; 0.83 = <span class="val">0.341</span> ✓</div>
+</div>
+<p style="margin-top:6px">The frozen <code>1/P_ref(loser)</code> and the conversion&#x2019;s <code>&times;P_cur(loser)</code> <strong>combine into R itself</strong>. Same for the winner, giving <code>&times;W</code>:</p>
+<div class="math">
+<div class="line">push DOWN on loser&nbsp; = (1&minus;sigmoid(z)) &times; <span class="lbl">R</span> = 0.409 &times; 0.83 = <span class="val">0.341</span></div>
+<div class="line">push UP on winner&nbsp;&nbsp; = (1&minus;sigmoid(z)) &times; <span class="lbl">W</span> = 0.409 &times; 1.20 = <span class="val">0.491</span></div>
+</div>
+
+<div class="card red" style="margin-top:12px">
+<h3>There is the defect: the loser stalls</h3>
+<p>The loser&#x2019;s push is proportional to <strong>R</strong> &mdash; and R is small <em>precisely because you have been succeeding at pushing the loser down</em>. So success weakens the very force producing it. Factor out <code>(1&minus;sigmoid(z))</code> to see it alone:</p>
+<div class="scroll"><table>
+<tr><th>where the loser is</th><th>R</th><th>push down on loser</th></tr>
+<tr><td>untouched</td><td>1.0</td><td>1.00 &times; (1&minus;sigmoid)</td></tr>
+<tr><td>2&times; less likely</td><td>0.5</td><td>0.50 &times; (1&minus;sigmoid)</td></tr>
+<tr><td>10&times; less likely</td><td>0.1</td><td>0.10 &times; (1&minus;sigmoid)</td></tr>
+<tr><td>100&times; less likely</td><td>0.01</td><td style="color:#ef5350">0.01 &times; (1&minus;sigmoid)</td></tr>
+</table></div>
+<p style="margin-top:8px">The loser asymptotes: it can never be driven properly down, because the closer it gets to zero the weaker the push becomes. Meanwhile the winner&#x2019;s push, proportional to W, <em>grows</em> as it wins. Take the cleanest case &mdash; two symmetric events:</p>
+<div class="math">
+<div class="line">winner became <span class="val">2&times;</span> MORE likely&nbsp; &rarr;&nbsp; W = 2.0</div>
+<div class="line">loser&nbsp; became <span class="val">2&times;</span> LESS likely&nbsp; &rarr;&nbsp; R = 0.5</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// the same size of change, in opposite directions. But:</span></div>
+<div class="line">|winner push| / |loser push| = W / R = 2.0 / 0.5 = <span class="val">4</span></div>
+<div class="line"><span class="cmt">// the winner is pushed FOUR TIMES harder for an equal-sized event.</span></div>
+</div>
+<p style="margin-top:6px">And none of this was visible in the loss. The gap <code>z = 0.37</code> looked perfectly healthy &mdash; the flaw is entirely in how that one gap gets <em>distributed</em> between the two responses.</p>
+</div>
+
+<p style="margin-top:12px"><strong>Attempt 3 &mdash; take the log of each ratio, and the distribution problem vanishes.</strong> Because a log turns the division into a subtraction, the reference term becomes an additive constant, and its derivative is exactly 1:</p>
+<div class="math">
+<div class="line">u = log W &minus; log R</div>
+<div class="line">  = log P_cur(winner) &minus; log P_ref(winner) &minus; log P_cur(loser) + log P_ref(loser)</div>
+<div class="line">                        └── constant ──┘                        └── constant ──┘</div>
+<div class="line">&nbsp;</div>
+<div class="line">du / d( log P_cur(winner) ) = <span class="val">+1</span>&nbsp;&nbsp;&nbsp;&nbsp; du / d( log P_cur(loser) ) = <span class="val">&minus;1</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// no W, no R &mdash; so the pushes are:</span></div>
+<div class="line">push UP on winner&nbsp;&nbsp; = (1 &minus; sigmoid(u))   = <span class="val">0.410</span></div>
+<div class="line">push DOWN on loser&nbsp; = (1 &minus; sigmoid(u))   = <span class="val">0.410</span></div>
+<div class="line"><span class="cmt">// (u = 0.182 &minus; (&minus;0.182) = 0.365, sigmoid(0.365) = 0.590)</span></div>
+</div>
+<p style="margin-top:6px"><span class="key">Exactly equal and opposite, at every stage of training.</span> No stall, and a symmetric pair of events gets a symmetric pair of pushes. This is also the property the gradient card lower down this tab quotes as a fact ("UP with strength 0.0491 / DOWN with strength 0.0491") &mdash; the log is <em>what makes it true</em>.</p>
+<div class="scroll"><table>
+<tr><th>score used</th><th>push on winner</th><th>push on loser</th><th>equal?</th></tr>
+<tr><td>raw ratio (attempt 2)</td><td>(1&minus;sigmoid)&times;<strong>W</strong></td><td>(1&minus;sigmoid)&times;<strong>R</strong></td><td style="color:#ef5350">no &mdash; ratio W:R</td></tr>
+<tr><td>log ratio (attempt 3)</td><td>(1&minus;sigmoid)</td><td>(1&minus;sigmoid)</td><td style="color:#4caf50">yes, always</td></tr>
+</table></div>
+<p style="margin-top:8px;font-size:.88em">Two honest footnotes. (1) The symmetry above is a real mechanical property, but the <em>primary</em> reason DPO uses a log is that the theory produces it: the KL-regularized objective&#x2019;s optimum is <code>&beta;&middot;log(P_cur/P_ref)</code>, not a design choice. (2) The reference model is doing two jobs here &mdash; fixing attempt 1&#x2019;s length problem and anchoring the model. <a href="14_simpo.html" style="color:#4fc3f7">Chapter 14</a> keeps the log but drops the reference, dividing by token count instead.</p>
+
+<p style="margin-top:10px"><strong>Last piece — β is a unit conversion.</strong> The log-ratio is in "how far the model moved" units; the loss wants "reward" units. β sets the exchange rate, and it isn't arbitrary: it falls out of the KL-regularized objective on the next tab, where β is the same knob that says how expensive drift is.</p>
+<div class="math">
+<div class="line"><span class="hl">score(y) = β × log( P_current(y) / P_ref(y) )</span>   <span class="cmt">// the "implicit reward"</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">score(winner) − score(loser) = β × (0.182 − (−0.182)) = β × <span class="val">0.364</span></div>
+<div class="line"><span class="cmt">// ...which is exactly the "gap" computed in Step 3 below.</span></div>
+</div>
+
+<details class="more"><summary>Footnote: the theory's version has an extra term — and it cancels</summary>
+<p style="margin-top:8px">The exact result from the DPO paper is <code>score(y) = β·log(P_cur(y)/P_ref(y)) + β·log Z(prompt)</code>. That second term is ugly and impossible to compute — but it depends <em>only on the prompt</em>, not on the response. Winner and loser share the same prompt, so it is identical for both and vanishes in the subtraction:</p>
+<div class="math">
+<div class="line">score(w) − score(l) = β(log_ratio_w + log Z) − β(log_ratio_l + log Z)</div>
+<div class="line">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = β(log_ratio_w − log_ratio_l)&nbsp;&nbsp; <span class="cmt">// Z is gone</span></div>
+</div>
+<p style="margin-top:6px">This is the same thing ch. 5 said about the reward model: only the GAP means anything, add a constant to every score and the loss is unchanged. That property is exactly what makes the uncomputable term harmless.</p>
+</details>
+
+<p style="margin-top:10px;font-size:.88em">The loss it plugs into is the Bradley-Terry model, derived from scratch in the optional aside <a href="5a_bradley_terry.html" style="color:#4fc3f7">5a</a>. This substitution IS the DPO paper — its math shows this score is what the optimal reward model would have been. The paper's actual subtitle: <em>"Your Language Model is Secretly a Reward Model."</em> Page 1 said "use the LLM itself as the reward model" — this is where that happens.</p>
+<p style="margin-top:6px;font-size:.88em">And <strong>sigmoid</strong> turns a score gap into a probability, exactly like in ch. 5: gap 0 → 0.5 (coin flip: "no idea who wins"), big positive gap → near 1.0 ("winner clearly wins").</p>
+</div>
+
+<div class="card blue">
+<h3>Step 3: The DPO loss</h3>
+<p>Tab 2.1 ended with a push <em>rule</em>: strength = 1 − belief. But an optimizer doesn’t take rules — it takes a loss and differentiates it. So we need the loss whose gradient <strong>is</strong> that rule. That loss is <span class="key">−log(belief)</span>: near-certain belief → loss near 0; belief 0.5 → loss 0.69; belief near 0 (model has the pair backwards) → loss huge. The last card on this tab checks that its gradient comes out to exactly 1 − belief.</p>
+<div class="math">
+<div class="line"><span class="cmt">// β comes from the penalty for drifting away from the reference</span></div>
+<div class="line"><span class="lbl">β</span> = <span class="val">0.1</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Gap = how much more the model prefers winner over loser</span></div>
+<div class="line"><span class="lbl">gap</span> = β × (log_ratio_w - log_ratio_l)</div>
+<div class="line">&nbsp;&nbsp;&nbsp;&nbsp; = 0.1 × (0.182 - (-0.182))</div>
+<div class="line">&nbsp;&nbsp;&nbsp;&nbsp; = 0.1 × 0.364</div>
+<div class="line">&nbsp;&nbsp;&nbsp;&nbsp; = <span class="val">0.0364</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Loss = -log(sigmoid(gap))</span></div>
+<div class="line"><span class="lbl">sigmoid</span>(0.0364) = <span class="val">0.509</span> <span class="cmt">// barely above 0.5 — model slightly prefers winner</span></div>
+<div class="line"><span class="hl"><span class="lbl">loss</span> = -log(0.509) = <span class="val">0.675</span></span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// If the model strongly preferred winner: sigmoid → 0.99, loss → 0.01 (tiny)</span></div>
+<div class="line"><span class="cmt">// If the model preferred loser: sigmoid → 0.01, loss → 4.6 (huge!)</span></div>
+<div class="line"><span class="cmt">// Loss pushes the model to widen the gap between winner and loser.</span></div>
+</div>
+</div>
+
+<div class="card green">
+<h3>Step 4: Backprop and update</h3>
+<div class="math">
+<div class="line"><span class="lbl">loss</span>.backward()  <span class="cmt">// compute gradients</span></div>
+<div class="line"><span class="lbl">optimizer</span>.step()  <span class="cmt">// update LLM weights</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// After update:</span></div>
+<div class="line"><span class="lbl">P_current</span>("Why did the chicken..." | prompt) = <span class="val" style="color:#4caf50">0.032</span> <span class="cmt">// went UP ✓</span></div>
+<div class="line"><span class="lbl">P_current</span>("I cannot help..." | prompt)      = <span class="val" style="color:#ef5350">0.009</span> <span class="cmt">// went DOWN ✓</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// The reference model stays frozen. It never changes.</span></div>
+<div class="line"><span class="cmt">// It's the anchor that prevents the LLM from drifting too far.</span></div>
+</div>
+<p style="margin-top:8px">Winner got more likely, loser got less likely. That's one DPO step. Repeat for all 50,000 preference pairs.</p>
+</div>
+
+<div class="card">
+<h3>What the gradient actually does — one number steers everything</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Differentiate loss = −log(sigmoid(gap)). The chain rule leaves</span></div>
+<div class="line"><span class="cmt">// ONE scalar in front of everything (times the learning rate):</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="lbl">push strength</span> = β × (1 − sigmoid(gap))&nbsp;&nbsp; <span class="cmt">// = β × (1 − belief): tab 2.1’s rule,</span></div>
+<div class="line"><span class="cmt">//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; recovered automatically by backward()</span></div>
+<div class="line">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = 0.1 × (1 − 0.509)</div>
+<div class="line">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; = 0.1 × 0.491 = <span class="val">0.0491</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">log P(winner) pushed <span style="color:#4caf50">UP</span>&nbsp;&nbsp; with strength 0.0491</div>
+<div class="line">log P(loser)&nbsp; pushed <span style="color:#ef5350">DOWN</span> with strength 0.0491</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Read (1 − sigmoid(gap)) as "how wrong am I still?":</span></div>
+<div class="line"><span class="cmt">//   model barely prefers winner (0.509, our case) → strong push (0.491)</span></div>
+<div class="line"><span class="cmt">//   model strongly prefers winner (0.99)          → tiny push  (0.01)</span></div>
+<div class="line"><span class="cmt">//   model prefers the LOSER (0.10)                → huge push  (0.90)</span></div>
+</div>
+<p style="margin-top:6px;font-size:.88em">So pairs the model already gets right fade out automatically, and pairs it gets backwards shout the loudest. Self-weighting, for free — the same "already-confident → small push" behavior you saw in the REINFORCE gradient (1−p), wearing a different formula.</p>
+</div>
+
+<div class="card red">
+<h3>The big gotcha: Step 4 said "winner went UP ✓" — in real runs it often DOESN'T</h3>
+<p>Walk the chain, because each link matters:</p>
+<div class="math">
+<div class="line"><span class="cmt">// (1) The loss only ever sees the GAP. Any weight change that widens</span></div>
+<div class="line"><span class="cmt">//     the gap lowers the loss — INCLUDING one where both responses fall:</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">//                 before              after (illustrative of the documented pattern)</span></div>
+<div class="line">log P(winner)&nbsp;&nbsp; <span class="val">−3.507</span> (P=0.030)&nbsp;&nbsp; <span class="val" style="color:#ef5350">−4.0</span> (P=0.018)&nbsp;&nbsp; <span class="cmt">// FELL 40%!</span></div>
+<div class="line">log P(loser)&nbsp;&nbsp;&nbsp; <span class="val">−4.605</span> (P=0.010)&nbsp;&nbsp; <span class="val" style="color:#ef5350">−6.0</span> (P=0.0025) <span class="cmt">// fell faster</span></div>
+<div class="line">margin&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class="val">1.098</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <span class="val" style="color:#4caf50">2.0</span>&nbsp;&nbsp;&nbsp; <span class="cmt">// gap GREW → loss went DOWN ✓?!</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// The loss is perfectly happy. Your good answer just got LESS likely.</span></div>
+</div>
+<p style="margin-top:8px"><strong>(2) Why would the winner fall at all?</strong> Both probabilities come from the <em>same shared weights</em> — and, worse, often from <em>shared tokens</em>. Take a pair that differs by one word:</p>
+<div class="math">
+<div class="line">winner = <span class="str">"two plus two is four"</span></div>
+<div class="line">loser&nbsp; = <span class="str">"two plus two is five"</span>&nbsp;&nbsp; <span class="cmt">// 4 of 5 tokens SHARED</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Pushing the loser down = pushing down P("two"), P("plus"|two), ...</span></div>
+<div class="line"><span class="cmt">// — tokens that are 4/5 of the WINNER too. The winner gets dragged</span></div>
+<div class="line"><span class="cmt">// down with it; the margin still widens through the final token.</span></div>
+<div class="line"><span class="cmt">// (The DPOP paper showed this is worst exactly when pairs are similar</span></div>
+<div class="line"><span class="cmt">//  — small edit distance, like math answers differing in one number.)</span></div>
+</div>
+<p style="margin-top:8px"><strong>(3) Where does the lost probability go?</strong> Each token position is a softmax — mass is conserved. If winner AND loser both sink, the freed mass flows to responses that are <em>neither</em>: text nobody ever vetted. Researchers call this <strong>likelihood displacement</strong>, and it can silently unalign the model — you trained on good pairs and made unvetted text more likely.</p>
+<p style="margin-top:8px"><strong>(4) The fix: anchor the winner in absolute terms,</strong> not just relative ones:</p>
+<div class="math">
+<div class="line"><span class="cmt">// Simplest form (RPO-style): bolt a plain SFT term onto the loss —</span></div>
+<div class="line"><span class="lbl">loss</span> = dpo_loss + λ × ( −log P_current(winner) )</div>
+<div class="line"><span class="cmt">//        ↑ gap machinery          ↑ "and ALSO keep the winner likely, period"</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// DPOP variant: penalize only when the winner sinks below its start —</span></div>
+<div class="line"><span class="lbl">penalty</span> = max(0, log P_ref(winner) − log P_current(winner))</div>
+<div class="line"><span class="cmt">// fires only if the winner fell below the reference; zero otherwise.</span></div>
+</div>
+<p style="margin-top:8px;font-size:.88em"><strong>What to watch in a real run:</strong> log the margin AND log P(winner) separately. Margin rising while log P(winner) falls = displacement in progress — the single most useful DPO training-curve diagnostic.</p>
+</div>
+
+<button class="nx" onclick="go(4)">Next: Why does β matter? &#x2192;</button>
+</div>
+
+<!-- ============================================================ -->
+<!--  PAGE 3: BETA AND THE REFERENCE                              -->
+<!-- ============================================================ -->
+<div class="page" data-t="3. β and Reference">
+<h2>β and the Reference Model: Don't Drift Too Far</h2>
+
+<div class="card orange">
+<h3>Which of chapter 5's two leashes is β?</h3>
+<p>Chapter 5 ended with <em>two</em> different restraints, and they are not interchangeable — page 6 there contrasts them directly. β is the second one:</p>
+<div style="overflow-x:auto"><table>
+<tr><th>Restraint</th><th>Measures against</th><th>Limits</th><th>DPO's counterpart</th></tr>
+<tr><td>PPO's <strong>clip</strong></td><td>π_old — re-snapshotted every batch</td><td>change per batch (a speed limit)</td><td style="color:#888">none — DPO takes no repeated steps on stale data</td></tr>
+<tr><td>PPO's <strong>KL leash</strong></td><td>π_ref — frozen forever</td><td>total drift, ever ("stay near home")</td><td style="color:#4caf50;font-weight:600">β and the frozen reference</td></tr>
+</table></div>
+<p style="margin-top:8px">DPO needs no clip because it never reuses a batch across epochs against a moving snapshot — there is no sampling loop to go stale. What it does need is the <em>total-drift</em> guarantee, and that is exactly what β buys, measured against the same kind of frozen π_ref.</p>
+</div>
+
+<div class="card">
+<h3>First fix the direction: larger β means a stronger anchor</h3>
+<p>DPO begins from the same goal as KL-regularized RLHF:</p>
+<div class="math">
+<div class="line"><span class="lbl">goal</span> = human reward − β × distance from reference</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="lbl">β = 0.50</span> → each unit of distance costs 0.50 <span class="cmt">// stronger anchor</span></div>
+<div class="line"><span class="lbl">β = 0.10</span> → each unit of distance costs 0.10</div>
+<div class="line"><span class="lbl">β = 0.01</span> → each unit of distance costs 0.01 <span class="cmt">// weaker anchor</span></div>
+</div>
+<p>Therefore, all else equal, <strong>larger β favors staying closer to the reference; smaller β permits more deviation.</strong></p>
+<p style="margin-top:8px;font-size:.88em">One subtlety: β also appears inside DPO’s classification loss, so you should not look at one loss number and interpret it directly as “leash length.” Its meaning comes from the KL-regularized objective from which DPO was derived.</p>
+</div>
+
+<div class="card">
+<h3>The reference model: a frozen "before" snapshot</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Before DPO training:</span></div>
+<div class="line"><span class="lbl">reference_model</span> = copy(LLM)  <span class="cmt">// exact clone</span></div>
+<div class="line"><span class="lbl">reference_model</span>.freeze()     <span class="cmt">// never updated again</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// During training:</span></div>
+<div class="line"><span class="cmt">// LLM weights change → P_current changes</span></div>
+<div class="line"><span class="cmt">// reference stays frozen → P_ref stays the same</span></div>
+<div class="line"><span class="cmt">// log_ratio = log(P_current / P_ref) measures "how far have I drifted?"</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// If the LLM drifts too far from reference on the LOSER response:</span></div>
+<div class="line"><span class="cmt">//   log_ratio_l becomes very negative → gap shrinks → loss increases</span></div>
+<div class="line"><span class="cmt">//   "You're changing too much — stay closer to who you were."</span></div>
+</div>
+</div>
+
+<button class="nx" onclick="go(5)">Next: The full picture &#x2192;</button>
+</div>
+
+<!-- ============================================================ -->
+<!--  PAGE 4: FULL PICTURE                                        -->
+<!-- ============================================================ -->
+<div class="page" data-t="4. Full Picture">
+<h2>The Complete Journey</h2>
+
+<div class="card blue">
+<h3>Every chapter added exactly one thing</h3>
+<div style="overflow-x:auto"><table>
+<tr><th>Ch.</th><th>Algorithm</th><th>What it adds</th><th>Problem solved</th></tr>
+<tr><td>0</td><td>Policy gradient</td><td>gradient &times; reward</td><td>Learning without labels</td></tr>
+<tr><td>1</td><td>Bandit</td><td>Explore vs exploit</td><td>Finding the best action</td></tr>
+<tr><td>2</td><td>Q-learning</td><td>States + Q-table</td><td>Different situations need different actions</td></tr>
+<tr><td>3</td><td>REINFORCE</td><td>Neural network policy</td><td>Scaling to large/continuous states</td></tr>
+<tr><td>4</td><td>Actor-Critic</td><td>Baseline V(s)</td><td>Too much noise in the learning signal</td></tr>
+<tr><td>5</td><td>PPO</td><td>Ratio clipping</td><td>One bad update destroys everything</td></tr>
+<tr><td>-</td><td>RLHF</td><td>Learned reward model</td><td>Use human preferences as the reward</td></tr>
+<tr><td style="color:#4fc3f7;font-weight:700">6</td><td style="color:#4fc3f7;font-weight:700">DPO</td><td style="color:#4fc3f7;font-weight:700">Direct preference loss</td><td style="color:#4fc3f7;font-weight:700">Skip the reward model entirely</td></tr>
+</table></div>
+</div>
+
+<div class="card green">
+<h3>The DPO training loop — complete pseudocode</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Setup</span></div>
+<div class="line"><span class="lbl">reference</span> = frozen_copy(LLM)</div>
+<div class="line"><span class="lbl">β</span> = 0.1</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// For each preference pair in dataset:</span></div>
+<div class="line"><span class="kw">for</span> (prompt, winner, loser) <span class="kw">in</span> preference_data:</div>
+<div class="line">&nbsp;</div>
+<div class="line">&nbsp; <span class="cmt">// 1. Get log-probs from both models</span></div>
+<div class="line">&nbsp; log_ratio_w = log P_current(winner|prompt) - log P_ref(winner|prompt)</div>
+<div class="line">&nbsp; log_ratio_l = log P_current(loser|prompt)  - log P_ref(loser|prompt)</div>
+<div class="line">&nbsp;</div>
+<div class="line">&nbsp; <span class="cmt">// 2. Compute loss</span></div>
+<div class="line">&nbsp; loss = -log(sigmoid(β × (log_ratio_w - log_ratio_l)))</div>
+<div class="line">&nbsp;</div>
+<div class="line">&nbsp; <span class="cmt">// 3. Update (plain gradient descent — no PPO, no clipping, no sampling)</span></div>
+<div class="line">&nbsp; loss.backward()</div>
+<div class="line">&nbsp; optimizer.step()</div>
+</div>
+<p style="margin-top:8px">That's it. No reward model to train. No episodes to sample. Just a supervised-style loop over preference pairs.</p>
+</div>
+
+<div class="card purple">
+<h3>Pros and cons — with concrete examples of each</h3>
+<table>
+<tr><th></th><th>RLHF (PPO)</th><th>DPO</th></tr>
+<tr style="background:#0a1a0a"><td style="text-align:left;color:#4caf50">Pros</td>
+<td style="text-align:left;font-size:.85em">
+  <strong>Can use any reward signal</strong> — not just A-vs-B pairs.<br>
+  e.g. "response must be &lt;200 tokens" → reward = 1 if short, 0 if long.<br>
+  DPO can't do this without converting it to pairs first.<br><br>
+  <strong>Explores during training</strong> — generates fresh responses each step, so it can discover good answers the preference data never contained.<br>
+  e.g. Prompt: "Write a poem about rain." Even if no good poem exists in your dataset, PPO can stumble into one through sampling.
+</td>
+<td style="text-align:left;font-size:.85em">
+  <strong>Dead simple</strong> — one forward pass per model, one loss, one backward pass. Same engineering as fine-tuning. No generation loop.<br><br>
+  <strong>No reward hacking</strong> — there's no reward model to exploit. PPO can find weird outputs that score high on the reward model but humans would hate:<br>
+  e.g. reward model gives 0.95 to "Sure! Sure! Sure! Here's a great answer!!!" because it learned "enthusiastic = good." DPO can't be tricked this way.
+</td></tr>
+<tr style="background:#1a0a0a"><td style="text-align:left;color:#ef5350">Cons</td>
+<td style="text-align:left;font-size:.85em">
+  <strong>Complex</strong> — 2 models in memory (LLM + reward model), generation in the loop (slow), PPO hyperparameters (clip ε, learning rate, batch size, etc.)<br><br>
+  <strong>Reward hacking</strong> — reward model can be exploited (example above)
+</td>
+<td style="text-align:left;font-size:.85em">
+  <strong>Stuck with your dataset</strong> — only learns from the preference pairs you collected. If every "winner" response in your dataset is mediocre, DPO makes mediocre more likely. It can't discover better answers on its own.<br><br>
+  <strong>Needs good contrastive pairs</strong> — works best when winner and loser are different in a clear, specific way. Noisy or ambiguous pairs hurt more than they hurt PPO.
+</td></tr>
+</table>
+</div>
+
+<div class="card orange">
+<h3>"Less data" — is that a problem?</h3>
+<p>You asked: DPO uses a fixed dataset of preference pairs. PPO generates fresh data every step. Doesn't DPO see less?</p>
+<p style="margin-top:8px"><strong>Yes, and here's what that means concretely:</strong></p>
+<div class="math">
+<div class="line"><span class="cmt">// PPO training (simplified):</span></div>
+<div class="line"><span class="lbl">Step 1:</span> generate 1000 responses to 1000 prompts <span class="cmt">// fresh data</span></div>
+<div class="line"><span class="lbl">Step 2:</span> score them with reward model</div>
+<div class="line"><span class="lbl">Step 3:</span> update LLM</div>
+<div class="line"><span class="lbl">Step 4:</span> generate 1000 NEW responses <span class="cmt">// model changed, so new outputs</span></div>
+<div class="line"><span class="lbl">Step 5:</span> score them, update again...</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// After 100 steps: PPO has seen 100,000 unique model-generated responses</span></div>
+<div class="line"><span class="cmt">// Each one was generated AFTER the previous update, so they reflect</span></div>
+<div class="line"><span class="cmt">// the model's current state. The data is always "fresh."</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// DPO training:</span></div>
+<div class="line"><span class="lbl">Dataset:</span> 50,000 (prompt, winner, loser) pairs <span class="cmt">// collected ONCE, before training</span></div>
+<div class="line"><span class="lbl">Epoch 1:</span> loop through all 50,000 pairs</div>
+<div class="line"><span class="lbl">Epoch 2:</span> loop through the SAME 50,000 pairs again</div>
+<div class="line"><span class="lbl">Epoch 3:</span> same pairs again...</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// The model keeps seeing the same examples. As it improves,</span></div>
+<div class="line"><span class="cmt">// the easy pairs become useless (model already gets them right)</span></div>
+<div class="line"><span class="cmt">// but there's no way to generate harder examples.</span></div>
+</div>
+<p style="margin-top:8px"><strong>When this matters:</strong> complex tasks like coding or math, where the model needs to discover novel strategies through exploration. PPO's sampling helps here.</p>
+<p style="margin-top:4px"><strong>When it doesn't matter:</strong> style alignment ("be polite", "don't be preachy"), where the preference data already covers the space well. DPO works great here.</p>
+</div>
+
+<div class="card blue">
+<h3>State of the art (as of early 2025)</h3>
+<table>
+<tr><th>Model</th><th>Method</th><th>Notes</th></tr>
+<tr><td>GPT-4 / ChatGPT</td><td>RLHF (PPO)</td><td>Pioneered the approach. Lots of engineering to stabilize PPO at scale.</td></tr>
+<tr><td>Claude (Anthropic)</td><td>RLHF + Constitutional AI</td><td>Uses a mix: AI-generated preferences + RLHF. Not pure DPO.</td></tr>
+<tr><td>Llama 2 (Meta)</td><td>RLHF (PPO)</td><td>Two reward models (helpfulness + safety).</td></tr>
+<tr><td>Llama 3 (Meta)</td><td>DPO</td><td>Switched from PPO to DPO — simpler, comparable results.</td></tr>
+<tr><td>Zephyr</td><td>DPO</td><td>One of the first open models to show DPO matches RLHF quality.</td></tr>
+<tr><td>Mixtral / Mistral</td><td>DPO</td><td>Most open-source models now default to DPO.</td></tr>
+</table>
+<p style="margin-top:8px;font-size:.85em;color:#aaa">The trend: big labs with massive compute (OpenAI, Anthropic) still use RLHF because they can afford the complexity and benefit from exploration. Open-source and smaller teams use DPO because it's 10x simpler to implement and works nearly as well for most use cases.</p>
+</div>
+
+<div class="card">
+<h3>Newer variants (the field is moving fast)</h3>
+<table>
+<tr><th>Method</th><th>One-line idea</th></tr>
+<tr><td>IPO</td><td>Fixes DPO's urge to push the gap to infinity: DPO's loss keeps shrinking as the gap widens (sigmoid never hits 1), so on clean data it overtrains; IPO swaps in a squared loss that targets a FINITE gap and stops there</td></tr>
+<tr><td>DPOP / RPO</td><td>Fixes likelihood displacement (the red card on tab 2.2): adds a penalty/SFT term so the winner stays likely in ABSOLUTE terms, not just relative</td></tr>
+<tr><td><a href="14_simpo.html" style="color:#4fc3f7"><strong>SimPO</strong></a></td><td>Drops the reference model entirely; uses length-NORMALIZED log-prob (average per token) as the reward, so long responses aren't penalized for multiplying more numbers &lt; 1 &mdash; <a href="14_simpo.html" style="color:#4fc3f7">chapter 14</a> builds it step by step</td></tr>
+<tr><td>KTO</td><td>Doesn't need pairs at all — just "this response is good" or "this is bad" (thumbs up/down)</td></tr>
+<tr><td>ORPO</td><td>Combines SFT and DPO into a single training stage</td></tr>
+<tr><td>Online DPO</td><td>Generate fresh pairs from the CURRENT policy during training (hybrid: DPO's loss + RLHF's sampling) — attacks the off-policy staleness below</td></tr>
+</table>
+<p style="margin-top:8px;font-size:.85em;color:#aaa">The boundary between RLHF and DPO is blurring. "Online DPO" basically reinvents RLHF's sampling loop but with DPO's simpler loss. The field hasn't settled yet.</p>
+</div>
+
+<div class="card purple">
+<h3>Review questions with short answers</h3>
+<div style="overflow-x:auto"><table>
+<tr><th style="width:42%">Question</th><th>The one-line answer</th></tr>
+<tr><td>"Why can DPO skip the reward model?"</td><td>The LM's own log-ratio vs the reference — β·log(P<sub>cur</sub>/P<sub>ref</sub>) — IS a reward score; plug it into the same Bradley-Terry loss the RM would have been trained with, and the RM becomes redundant.</td></tr>
+<tr><td>"Is DPO reinforcement learning?"</td><td>Mechanically no — no sampling, no advantage, fixed dataset, supervised-style loop; mathematically it's the closed-form optimum of the same KL-leashed RLHF objective.</td></tr>
+<tr><td>"Can the winner's probability go DOWN during DPO?"</td><td>Yes, routinely — the loss only sees the margin, and similar pairs share tokens, so both can sink while the gap widens (likelihood displacement); fix = DPOP/RPO anchor on the winner.</td></tr>
+<tr><td>"What breaks with β too small? Too large?"</td><td>Too small: weak anchor, model drifts far from the reference and degrades fluency; too large: strong anchor, barely moves, preferences underfit.</td></tr>
+<tr><td>"DPO is offline — so what goes wrong?"</td><td>The pairs came from some other policy; as the model changes, it's being corrected on responses it would never produce — online/iterated DPO regenerates pairs from the current policy.</td></tr>
+<tr><td>"When would you pick PPO/GRPO over DPO?"</td><td>When reward is verifiable per response (math/code — no pairs needed) or you need the model to explore its OWN outputs, not text some earlier policy wrote.</td></tr>
+<tr><td>"Both responses in a pair are bad — what does DPO learn?"</td><td>It still pushes the 'less bad' one up relative to the other — garbage-in-pairs teaches 'least bad' preferences; KTO-style absolute labels handle this better.</td></tr>
+</table></div>
+</div>
+
+<div class="card orange">
+<h3>Where DPO sits on the map you'll need later</h3>
+<p>DPO trains on a <strong>fixed dataset of pairs that some other policy generated</strong> — in the vocabulary of <a href="9_on_off_policy.html" style="color:#4fc3f7">chapter 9</a>, it is <em>off-policy</em>. That's the deep reason behind both cons in the table above (stuck with your dataset, needs good pairs): the model never trains on its own current behavior. Everything after GRPO in this course — chapters 8-12 — is about what changes when you pay for on-policy data.</p>
+</div>
+</div>
+
+<script>
+const pages = document.querySelectorAll('.page');
+const nav = document.getElementById('nav');
+pages.forEach((p,i) => {
+  const b = document.createElement('button');
+  b.textContent = p.dataset.t;
+  b.onclick = () => go(i);
+  if(i===0) b.classList.add('on');
+  nav.appendChild(b);
+});
+function go(n){
+  pages.forEach((p,i) => p.classList.toggle('on', i===n));
+  nav.querySelectorAll('button').forEach((b,i) => {
+    b.classList.remove('on');
+    if(i<n) b.classList.add('done'); else b.classList.remove('done');
+    if(i===n) b.classList.add('on');
+  });
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+</script>
+</body>
+</html>

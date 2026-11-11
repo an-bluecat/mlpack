@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Per-parameter scale — AdaGrad → RMSProp</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:880px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+a.nx{display:inline-block;padding:10px 24px;background:#4caf50;color:#000;border-radius:8px;font-weight:700;font-size:.9em;margin-top:14px;text-decoration:none}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 10px;border:1px solid #333;text-align:left;font-size:.84em}
+th{background:#1a1a3a;color:#4fc3f7}
+td.num{font-family:'Fira Code',Consolas,monospace;text-align:right}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',Consolas,monospace;font-size:.84em;line-height:1.8;overflow-x:auto}
+.math .line{margin:2px 0;display:block;white-space:pre}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.math .kw{color:#c586c0}
+.math .fn{color:#dcdcaa}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math.out{border-left:3px solid #4caf50;background:#0d1a12}
+.outlabel{display:block;font-size:.72em;color:#4caf50;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.key{color:#ffb74d;font-weight:600}
+.inline{font-family:'Fira Code',Consolas,monospace;background:#1a1a2e;border:1px solid #333;border-radius:4px;padding:1px 6px;font-size:.86em;color:#9cdcfe}
+.faded{color:#888;font-size:.86em}
+ul{margin-left:20px;margin-top:6px}
+li{margin:4px 0}
+details{margin-top:12px}
+details summary{cursor:pointer;color:#888;font-size:.85em;padding:8px 12px;background:#12122a;border:1px solid #333;border-radius:8px}
+details summary:hover{color:#ccc;border-color:#555}
+details[open] summary{color:#4fc3f7;border-color:#4fc3f7}
+</style>
+
+<!-- adaptive-addition:start:version-styles -->
+<style id="adaptive-version-styles">
+.adaptive-version-switcher{max-width:1056px;margin:20px auto 28px;padding:14px 16px;border:1px solid #34465f;border-radius:8px;background:#112139;color:#ecf2fa;font:14px/1.5 'Segoe UI',system-ui,sans-serif;text-align:left}
+.adaptive-version-switcher .version-links{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center}
+.adaptive-version-switcher .version-links a{color:#a7b7cb;text-decoration:none;padding:4px 0;border-bottom:2px solid transparent}
+.adaptive-version-switcher .version-links a[aria-current="page"]{color:#66d0f5;border-bottom-color:#66d0f5;font-weight:600}
+.adaptive-version-switcher .version-links a:hover{color:#fff}
+.adaptive-version-switcher .version-links a:focus-visible{outline:3px solid #f5c477;outline-offset:4px}
+.adaptive-version-switcher p{font:13px/1.5 'Segoe UI',system-ui,sans-serif;color:#a7b7cb;margin:10px 0 0;max-width:none}
+@media(max-width:500px){.adaptive-version-switcher{padding:12px}.adaptive-version-switcher .version-links{gap:8px 15px}.adaptive-version-switcher .version-links a{padding:7px 0}}
+@media print{.adaptive-version-switcher{display:none}}
+</style>
+<!-- adaptive-addition:end:version-styles --></head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+
+<h1>Per-parameter scale — AdaGrad → RMSProp</h1>
+<p class="sub">Chapter 3. Momentum reshaped steps over time. This chapter reshapes them per parameter: every weight gets its own effective learning rate, set by its own history.</p>
+
+
+<!-- adaptive-addition:start:version-navigation -->
+<nav class="adaptive-version-switcher" aria-label="Chapter 3 versions"><div class="version-links"><a href="3_adaptive.html">1. Visual rewrite</a><a href="3_adaptive_original.html" aria-current="page">2. Previous lesson</a><a href="3_adaptive_original_plus_visuals.html">3. Previous + visuals</a></div><p>The previous four-tab lesson, preserved as it was before the visual rewrite.</p></nav>
+<script id="adaptive-version-title">document.title = 'Chapter 3 — 2. Previous lesson';</script>
+<!-- adaptive-addition:end:version-navigation --><div class="nav" id="nav"></div>
+
+<!-- PAGE 0 -->
+<div class="page on" data-t="0. The scale problem">
+<h2>The second disease, at its real scale</h2>
+
+<div class="card red">
+<h3>Two parameters, gradients 1000× apart</h3>
+<p>Forget curvature for a moment — here's the version of the problem you meet in every real network. One parameter sits in a hot path (say, a LayerNorm gain touched by every token): gradient <span class="key">−24</span>. Another sits in a cold path (an embedding row for a rare word): gradient <span class="key">−0.024</span>. Same model, same loss, same <span class="inline">lr=0.1</span>. What SGD does:</p>
+<div class="math out"><span class="outlabel">output — real run</span>
+<span class="line">  g= -24.000:  SGD lr=0.1 step =   2.4000</span>
+<span class="line">  g=  -0.024:  SGD lr=0.1 step =   0.0024</span>
+</div>
+<p>The hot parameter takes a wild 2.4-unit leap (remember chapter 1: that's deep in overshoot territory). The cold one moves by 0.0024 — it would need a thousand steps to move what the hot one moved in one. <span class="key">One lr cannot serve both.</span> Lower it and the cold parameter freezes entirely; raise it and the hot one explodes. This is chapter 1's bowl again, but now with a spread of scales no hand-tuning can bridge.</p>
+</div>
+
+<div class="card blue">
+<h3>State the wish precisely</h3>
+<p>What we want: <span class="key">every parameter should move about lr per step — regardless of how big its gradient happens to be.</span> The gradient should choose the <em>direction</em>; the learning rate should choose the <em>distance</em>; the gradient's <em>magnitude</em> should stop tyrannizing the step size.</p>
+<p>The move that achieves it: divide each parameter's step by (something like) <span class="key">the typical size of its own gradient</span>. Big-gradient parameters get divided by a big number, small-gradient parameters by a small one — both land near lr. The chapter is about what "typical size" should mean.</p>
+</div>
+
+<div class="card orange">
+<h3>The obvious first try — divide by TODAY's gradient. Watch it fail three ways</h3>
+<p>Before any history-keeping: the simplest reading of "divide by its own size" is divide by <em>today's</em> size. That has a closed form:</p>
+<div class="math">
+<span class="line">w  ←  w − lr · grad / |grad|   =   w − lr · <span class="hl">sign(grad)</span></span>
+</div>
+<p>Every parameter moves exactly lr, every step, no matter what. The wish, granted trivially — and this is a real method (<span class="key">sign descent</span>; Lion, 2023, is a polished version). But watch what dividing by <em>today</em> destroys:</p>
+<p><strong>Failure 1 — it cannot slow down at the bottom.</strong> Near the minimum the gradient shrinks toward 0, but sign(g) is still ±1, so the step is still a full lr. On the 1-D bowl L=w², start w=0.83, lr=0.1:</p>
+<div class="math out"><span class="outlabel">output — real run</span>
+<span class="line">  sign:  0.730, 0.630, 0.530, 0.430 ... then forever: -0.070, 0.030, -0.070, 0.030</span>
+<span class="line">  SGD :  0.664, 0.531, 0.425, 0.340 ... step 25:       0.003  (still shrinking)</span>
+</div>
+<p>Sign descent marches down beautifully, then <span class="key">bounces across the minimum forever</span> — it erased the one signal ("gradient is getting small") that says <em>you're close, ease off</em>.</p>
+<p><strong>Failure 2 — it erases "is today unusual?".</strong> Divide by today's size and every day looks the same. Divide by the <em>typical</em> size (root of the mean square so far) and a spike stands out while an ordinary day steps small:</p>
+<div class="math out"><span class="outlabel">output — real run: gradients 1, 1, 1, 10, 1</span>
+<span class="line">   t   g     g/|g|      typical = √(mean g² so far)     g/typical</span>
+<span class="line">   1   1      +1              1.000                       1.000</span>
+<span class="line">   4  10      +1              5.074                       1.971   ← spike SEEN: ~2× step</span>
+<span class="line">   5   1      +1              4.561                       0.219   ← caution after the shock</span>
+</div>
+<p>The ratio <span class="inline">today / typical</span> is information — sign descent throws it away; dividing by history keeps it.</p>
+<p><strong>Failure 3 — noise.</strong> Minibatch gradients are noisy. Take a true gradient of +0.02 buried in ±1.0 batch noise: g is +1.02 or −0.98, equally likely — so <span class="key">E[sign(g)] = 0, exactly</span>. Sign descent takes full-size steps in a direction that averages to nothing. Dividing by the typical size (≈1.0, the noise scale) gives steps of ≈ lr·g/1.0 — small, and their average preserves the +0.02 signal:</p>
+<div class="math out"><span class="outlabel">output — real run: 2,000 steps × 20 seeds, lr=0.1 (ideal progress = 4.00)</span>
+<span class="line">  sign descent    net move:  −0.5   (spread ±4.0 — pure random walk)</span>
+<span class="line">  divide-by-RMS   net move:  +3.1   (spread ±4.0 — the signal survives)</span>
+</div>
+<p>So "typical size" cannot mean today. It must mean <span class="key">a memory of this parameter's own past</span> — big enough to cancel scale, dumb enough to leave today's news visible. The rest of the chapter is two proposals for that memory.</p>
+</div>
+<button class="nx" onclick="go(1)">Next: AdaGrad — the first attempt</button>
+</div>
+
+<!-- PAGE 1 -->
+<div class="page" data-t="1. AdaGrad">
+<h2>AdaGrad: remember every gradient ever — and pay for it</h2>
+
+<div class="card">
+<h3>The update (2011)</h3>
+<div class="math">
+<span class="line">G  ←  G + grad²                    <span class="cmt"># per-parameter running SUM of squared gradients</span></span>
+<span class="line">w  ←  w − lr · grad / (√G + ε)     <span class="cmt"># divide by the root of the history</span></span>
+</div>
+<p>√G is the "typical gradient size so far" (root of the accumulated square). A parameter that has seen gradients of ~24 has √G ≈ 24·√t; one that's seen ~0.024 has √G ≈ 0.024·√t — each gets divided by its own scale, and the wish from page 0 comes true. AdaGrad was built for exactly the rare-word-embedding case, and it works.</p>
+<p>Check it against page 0's failed first try: on the very first step G = g², so √G = |g| and the step is <span class="inline">lr·g/|g|</span> — <span class="key">AdaGrad's step 1 IS sign descent</span>. The two methods only part ways at step 2, when the denominator becomes history instead of today. Everything page 0 wanted from "memory" arrives exactly there: √(g₁²+g₂²) can register that today is calmer than yesterday; |g₂| alone cannot.</p>
+</div>
+
+<div class="card red">
+<h3>The fatal flaw: the sum only grows</h3>
+<p>G adds a positive number every step and never forgets. So √G grows like √t forever, and the effective step shrinks like 1/√t — <span class="key">even if you're nowhere near done</span>. Watch it with a constant gradient (nothing is converging; the landscape isn't changing; the optimizer just… ages):</p>
+<div class="math out"><span class="outlabel">output — real run: constant g = −24, lr = 0.1</span>
+<span class="line">  step   1: effective step = 0.1000</span>
+<span class="line">  step   2: effective step = 0.0707</span>
+<span class="line">  step  10: effective step = 0.0316</span>
+<span class="line">  step 100: effective step = 0.0100</span>
+</div>
+<p>By step 100 the optimizer moves at a tenth of its starting speed, purely because time passed. For convex problems that's even provably the right schedule; for deep learning — where you may need full-speed steps at epoch 50 when the loss landscape shifts — it's a slow death. <span class="key">The idea (divide by gradient scale) is right; the memory (infinite) is wrong.</span></p>
+<p style="margin-top:10px"><span class="key">But don't file this as a pure defect — it is a trade, and it buys something.</span> An optimizer whose step decays on a schedule <em>can settle</em>. Run AdaGrad on chapter 1's bowl and it does what sign descent could not:</p>
+<div class="math out"><span class="outlabel">output — real run: L = w², w₀ = 0.83, lr = 0.1</span>
+<span class="line">  AdaGrad  t=   200: |w| = 7.076e-05        <span class="cmt"># sign descent, same t: |w| ≈ 0.05, forever</span></span>
+<span class="line">  AdaGrad  t= 1,000: |w| = 1.671e-20</span>
+<span class="line">  AdaGrad  t=20,000: |w| = 5.929e-323       <span class="cmt"># it lands, and stays landed</span></span>
+</div>
+<p>The very 1/√t that starves it at epoch 50 is what lets it come to rest at the bottom. Hold that thought for exactly one page: <span class="key">RMSProp removes the decay — and gives back the landing.</span></p>
+</div>
+<button class="nx" onclick="go(2)">Next: RMSProp — forget the distant past</button>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page" data-t="2. RMSProp">
+<h2>RMSProp: same idea, sliding-window memory</h2>
+
+<div class="card green">
+<h3>One-symbol fix: replace the sum with a decaying average</h3>
+<div class="math">
+<span class="line">v  ←  β·v + (1−β)·grad²            <span class="cmt"># EMA of squared gradients (β = 0.9: last ~10 steps)</span></span>
+<span class="line">w  ←  w − lr · grad / (√v + ε)     <span class="cmt"># divide by the RECENT typical size</span></span>
+</div>
+<p>This is chapter 2's memory trick applied to the <em>denominator</em>: v is an exponential moving average (the (1−β) makes it a true average — it settles at the typical g², not 10× it). Old gradients fade instead of accumulating, so the effective lr tracks the <em>recent</em> gradient scale and never dies of old age. The name says exactly what it divides by: <span class="key">R</span>oot <span class="key">M</span>ean <span class="key">S</span>quare, <span class="key">Prop</span>agated over time.</p>
+</div>
+
+<div class="card">
+<h3>The wish, granted — real numbers</h3>
+<div class="math out"><span class="outlabel">output — real run: first step, lr = 0.1, β = 0.9</span>
+<span class="line">  g= -24.000:  SGD step =   2.4000 | RMSProp step =   0.3162</span>
+<span class="line">  g=  -0.024:  SGD step =   0.0024 | RMSProp step =   0.3162</span>
+</div>
+<p>Look at the right column: <span class="key">identical steps for gradients 1000× apart.</span> Trace the big one by hand: v = 0.9·0 + 0.1·(−24)² = 57.6; √v = 7.589; step = 0.1·24/7.589 = 0.3162. The tiny one: v = 0.1·(0.024)² → √v = 0.00759 → same 0.3162. Each parameter is divided by its own recent scale, so the scale cancels — direction survives, magnitude is normalized. Page 0's wish, delivered.</p>
+</div>
+
+<div class="card orange">
+<h3>But squint at that number: 0.3162 ≠ lr = 0.1</h3>
+<p>The wish said "move about lr." We got 3.16× lr. Why: on the very first step, v = <span class="key">0.1</span>·g² — the EMA has only collected 10% of one sample, so it <span class="key">underestimates</span> the typical g² by 10×, and √v underestimates by √10 ≈ 3.16 — inflating the step by exactly that. A freshly-initialized EMA lies small; dividing by a lie-small number means stepping too big, right at the start of training when weights are random and caution matters most.</p>
+<p><span class="key">Remember 0.3162.</span> Fixing precisely this number — by explicitly correcting the young EMA's underestimate — is one of the two things Adam adds in the next chapter.</p>
+<p>The whole chapter is one picture — feed both optimizers the same constant gradient and just watch the effective step over time:</p>
+<svg viewBox="0 0 760 300" style="width:100%;max-width:760px;display:block;margin:14px auto" font-family="'Segoe UI',system-ui,sans-serif" xmlns="http://www.w3.org/2000/svg">
+<line x1="60" y1="260" x2="740" y2="260" stroke="#333"/>
+<line x1="60" y1="30" x2="60" y2="260" stroke="#333"/>
+<line x1="60" y1="197" x2="740" y2="197" stroke="#4caf50" stroke-dasharray="4,4" opacity="0.5"/>
+<text x="54" y="201" text-anchor="end" font-size="11" fill="#4caf50">lr=0.1</text>
+<polyline fill="none" stroke="#ef5350" stroke-width="2" points="60,197.1 72,215.6 83,223.7 95,228.6 106,231.9 118,234.3 129,236.2 141,237.8 152,239.0 164,240.1 175,241.0 187,241.9 198,242.6 210,243.2 221,243.8 233,244.3 244,244.8 256,245.2 267,245.6 279,245.9 291,246.3 302,246.6 314,246.9 325,247.2 337,247.4 348,247.7 360,247.9 371,248.1 383,248.3 394,248.5 406,248.7 417,248.9 429,249.1 440,249.2 452,249.4 463,249.5 475,249.7 486,249.8 498,249.9 509,250.1 521,250.2 533,250.3 544,250.4 556,250.5 567,250.6 579,250.7 590,250.8 602,250.9 613,251.0 625,251.1 636,251.2 648,251.3 659,251.4 671,251.4 682,251.5 694,251.6 705,251.7 717,251.7 728,251.8 740,251.9"/>
+<polyline fill="none" stroke="#4fc3f7" stroke-width="2" points="60,61.2 72,115.8 83,139.3 95,152.8 106,161.8 118,168.2 129,173.0 141,176.7 152,179.7 164,182.1 175,184.1 187,185.8 198,187.2 210,188.4 221,189.5 233,190.4 244,191.1 256,191.8 267,192.4 279,192.9 291,193.4 302,193.8 314,194.2 325,194.5 337,194.8 348,195.0 360,195.2 371,195.4 383,195.6 394,195.8 406,195.9 417,196.0 429,196.1 440,196.3 452,196.3 463,196.4 475,196.5 486,196.6 498,196.6 509,196.7 521,196.7 533,196.8 544,196.8 556,196.8 567,196.9 579,196.9 590,196.9 602,196.9 613,197.0 625,197.0 636,197.0 648,197.0 659,197.0 671,197.0 682,197.0 694,197.1 705,197.1 717,197.1 728,197.1 740,197.1"/>
+<circle cx="60" cy="61.2" r="3.5" fill="#4fc3f7"/>
+<text x="74" y="56" font-size="11.5" fill="#4fc3f7">starts at 0.3162 — the young-EMA lie (÷√0.1)</text>
+<text x="440" y="176" text-anchor="middle" font-size="11.5" fill="#4fc3f7">RMSProp: settles at exactly lr and stays</text>
+<text x="440" y="234" text-anchor="middle" font-size="11.5" fill="#ef5350">AdaGrad: lr/√t — still shrinking at t=60, will shrink forever</text>
+<text x="62" y="278" font-size="11" fill="#9aa0b5">t = 1</text>
+<text x="740" y="278" text-anchor="end" font-size="11" fill="#9aa0b5">t = 60</text>
+<text x="380" y="296" text-anchor="middle" font-size="11" fill="#9aa0b5">real data: effective step size per step, constant gradient, lr = 0.1 — AdaGrad ages to death; RMSProp overshoots young, then holds lr</text>
+</svg>
+<details><summary>Refresher: why divide by the SQUARE ROOT of v, not v itself?</summary>
+<p style="padding:8px 4px">Units. v averages <span class="inline">g²</span>, so its natural scale is (gradient)² — for g ≈ 24, v ≈ 576. Divide g by v and you'd get 24/576 = 1/24: the step would <em>shrink</em> for big gradients and <em>blow up</em> for tiny ones far too aggressively (1000× spread becomes 1000× the other way). Take the root first and √v ≈ |g|, so <span class="inline">g/√v ≈ ±1</span> — a clean, dimensionless "which way, in units of my own typical size." Then lr alone sets the distance. Rule of thumb: <span class="key">anything that averages squares must be un-squared before it meets the gradient.</span></p></details>
+</div>
+
+<div class="card red">
+<h3>The bill for removing the decay: RMSProp inherits page 0's Failure 1</h3>
+<p>Page 0 killed sign descent partly because it <em>cannot slow down at the bottom</em>. Fair question, and the chapter owes you the answer: <span class="key">does dividing by a decaying average fix that?</span> Run RMSProp on the very same bowl that exposed sign descent — L = w², w₀ = 0.83, lr = 0.1:</p>
+<div class="math out"><span class="outlabel">output — real run</span>
+<span class="line">  t=  1   |w| = 5.138e-01        <span class="cmt"># the 0.3162 overshoot</span></span>
+<span class="line">  t= 16   |w| = 5.877e-05        <span class="cmt"># it IS slowing down — beautifully</span></span>
+<span class="line">  t= 40   |w| = 3.093e-19        <span class="cmt"># converged, for all practical purposes</span></span>
+<span class="line">  t= 80   |w| = 1.618e-03        <span class="cmt"># ... climbing back OUT?</span></span>
+<span class="line">  t=120   |w| = 6.203e-02</span>
+<span class="line">  t=200   |w| = <span class="hl">5.014e-02</span>        <span class="cmt"># settles here and never leaves</span></span>
+</div>
+<p>So the answer is <span class="key">no — and the way it fails is worth more than the fact that it fails.</span> RMSProp does slow down (the ratio g/√v falls 3.16 → 0.058 → ~0), converges to 10⁻¹⁹ — and is then <em>kicked back out</em>, landing in a permanent oscillation. Where does it land? Sweep lr:</p>
+<div class="math out"><span class="outlabel">output — real run: final |w| after 400 steps</span>
+<span class="line">  lr = 0.20 → 0.1000      lr = 0.05 → 0.0250      lr = 0.01 → 0.0050</span>
+<span class="line">  lr = 0.10 → 0.0500      lr = 0.02 → 0.0100      <span class="cmt"># every row: |w| = lr/2, to 3 decimals</span></span>
+</div>
+<p><span class="key">|w| = lr/2 — the exact orbit sign descent settles into</span> (its cycle spans −0.070 … 0.030 at lr = 0.1: RMS 0.054). Same destination, reached in 100 steps instead of 8.</p>
+<p><strong>Why the kick-out?</strong> Trace the two quantities separately. Once w is tiny the parameter stops moving, so g holds still — but v does not: with nothing to feed it, the EMA keeps shrinking by β = 0.9 each step, so √v decays ×0.949 per step <em>forever</em>. A fixed numerator over a denominator sliding toward zero:</p>
+<div class="math out"><span class="outlabel">output — real run: the ratio climbing back</span>
+<span class="line">  t= 40   g = 5.16e-19   √v = 9.10e-02   ratio = 0.0000   <span class="cmt"># asleep</span></span>
+<span class="line">  t= 80   g = 3.38e-03   √v = 1.02e-01   ratio = 0.0331   <span class="cmt"># the yardstick has shrunk; steps resume</span></span>
+<span class="line">  t=100   g = 4.00e-02   √v = 9.24e-02   ratio = 0.4327   <span class="cmt"># feedback: bigger step → bigger g → bigger step</span></span>
+<span class="line">  t=120   g = 1.26e-01   √v = 1.01e-01   ratio = 1.2477   <span class="cmt"># ratio ≈ ±1 — sign descent, in all but name</span></span>
+</div>
+<p>Not "it never slowed down" but <span class="key">"it slowed down, then forgot why."</span> The equilibrium is where the two decays balance, and the ratio sits at ≈ ±1 — precisely the state page 0 called a failure. (Not an ε artifact: rerun with ε from 1e−16 to 1e−4 and the answer is 5.01e−02 every time.)</p>
+<p><span class="key">This is the same trade as the previous page, read from the other side.</span> AdaGrad's 1/√t is a permanent brake: it lands, but it dies of old age. RMSProp releases the brake: it stays alive forever, and can no longer land.</p>
+<div class="math out"><span class="outlabel">output — real run: |w| at t = 200, same bowl, lr = 0.1</span>
+<span class="line">  SGD      3.4e-20   lands   <span class="cmt"># step ∝ g, and g → 0</span></span>
+<span class="line">  AdaGrad  7.1e-05   lands   <span class="cmt"># the 1/√t "flaw" IS the brake</span></span>
+<span class="line">  Adam     1.8e-05   lands   <span class="cmt"># see the foldable — for a reason you'll meet again in ch. 6</span></span>
+<span class="line">  sign     5.4e-02   orbits at lr/2</span>
+<span class="line">  RMSProp  5.0e-02   orbits at lr/2</span>
+</div>
+<p>Which brings up the thing nobody tells you when they hand you Adam: <span class="key">an adaptive optimizer does not anneal itself, so you must anneal it.</span> That is what a learning-rate schedule is <em>for</em> — not a tuning nicety but the brake AdaGrad had built in and RMSProp gave away. In real (noisy) training the effect is unmissable, because minibatch noise never shrinks: near a minimum √v is pinned at the noise scale, g/√v ≈ ±1, and the parameters diffuse in a ball rather than converging.</p>
+<div class="math out"><span class="outlabel">output — real run: noisy bowl (g = 2w + 𝒩(0, 0.1)), RMS|w| over the last 500 of 3,000 steps, 8 seeds</span>
+<span class="line">                    constant lr      lr decayed linearly to 0</span>
+<span class="line">  SGD                  0.0170               <span class="hl">0.0047</span></span>
+<span class="line">  Adam                 0.0447               <span class="hl">0.0141</span></span>
+<span class="line">  RMSProp              0.0621               <span class="hl">0.0147</span></span>
+</div>
+<p>Every optimizer's noise ball shrinks 3–4× from the schedule alone — same weights, same gradients, same everything else. <span class="key">Adaptive methods buy you scale-blindness, and the price is that the last mile is yours to schedule.</span></p>
+<details><summary>Then why did Adam land? (a preview of the coupling rule)</summary>
+<p style="padding:8px 4px">Because Adam's numerator has a memory too, and it forgets <em>faster</em> than the yardstick does. When gradients shrink geometrically, m decays like β₁ᵗ = 0.9ᵗ while √v decays like √β₂ᵗ = 0.9995ᵗ — so the ratio m/√v shrinks and Adam brakes itself to 3.5e−92 by t = 4,000. RMSProp has no numerator memory: its "m" is today's raw g, which freezes when w freezes, while √v keeps sliding. The governing quantity is β₁ vs √β₂ — the same inequality, in the same direction, that <a href="6_laprop.html" style="color:#4fc3f7">chapter 6</a> shows can make Adam <em>explode</em> when it points the other way. One rule, two opposite consequences. And note this is a <em>deterministic</em> rescue: on the noisy bowl above, Adam's ball is 0.0447 — it still needs the schedule.</p></details>
+</div>
+
+<div class="card red">
+<h3>ε — not decoration. It's the line between signal and dust</h3>
+<p>Every update in this chapter ends in <span class="inline">/ (√v + ε)</span>. Two separate jobs hide in that ε, and both are checkable.</p>
+<p><strong>Job 1 — stop one specific NaN.</strong> A parameter can receive an <em>exactly zero</em> gradient for many steps — a dead ReLU's weights, an embedding row no batch has touched, a padded position. Then v = 0, and without ε:</p>
+<div class="math out"><span class="outlabel">output — real run</span>
+<span class="line">  eps=0, g=0, v=0:   step = lr · 0/√0 = <span class="hl">nan</span></span>
+<span class="line">  then:  w −= nan  →  w = nan.   nan·0.9 = nan,  nan+5 = nan — nothing recovers it.</span>
+</div>
+<p>One 0/0 and that weight is poisoned for the rest of training — and everything it touches downstream goes NaN with it. ε makes the same case read <span class="inline">0/(0+1e-8) = 0</span>: a parameter with no gradient takes no step. Sane.</p>
+<p><strong>Job 2 — refuse to amplify numerical dust.</strong> The whole point of dividing by √v is to <em>equalize</em>: any gradient, however small, gets scaled up to a ~lr step. But "however small" is a bug, not a feature — a gradient of 10⁻¹⁰ is not information, it's float rounding noise, and equalizing would hand it a full-size step. Watch what the ε in the denominator does across scales (steady state, where √v = |g|):</p>
+<div class="math out"><span class="outlabel">output — real run: step multiplier |g|/(|g|+ε), ε = 1e-8</span>
+<span class="line">  g = 24        →  step = lr · 1.000000     ┐</span>
+<span class="line">  g = 0.024     →  step = lr · 1.000000     ├ signal: fully equalized</span>
+<span class="line">  g = 1e-6      →  step = lr · 0.990099     ┘</span>
+<span class="line">  g = 1e-8      →  step = lr · 0.500000     ← the crossover: g ≈ ε</span>
+<span class="line">  g = 1e-10     →  step = lr · 0.009901     ┐ dust: quietly ignored</span>
+<span class="line">  g = 0         →  step = lr · 0.000000     ┘</span>
+</div>
+<p>Read the column: above ε, every gradient is normalized to lr; below ε, the division stops mattering and the update degrades to <span class="inline">≈ lr·g/ε</span> — plain SGD with a fixed multiplier, which for dust-sized g is a dust-sized step. <span class="key">ε is the optimizer's definition of "too small to be real"</span> — the threshold where it stops equalizing and starts ignoring.</p>
+<p>That's also why ε is a real tunable, not a constant of nature: in float16 mixed precision, gradient noise sits far above 10⁻⁸, so the default threshold misclassifies noise as signal — raising ε to 1e-6 (or more) moves the line to where the dust actually is. If a loss spike ever traces back to one strange parameter group, checking ε is a legitimate move, not superstition.</p>
+</div>
+<button class="nx" onclick="go(3)">Next: two memories, one map</button>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page" data-t="3. The map">
+<h2>Two memories now exist — put them on one map</h2>
+
+<div class="card blue">
+<h3>Numerator memory vs denominator memory</h3>
+<table>
+<tr><th></th><th>Momentum (ch. 2)</th><th>RMSProp (this chapter)</th></tr>
+<tr><td>remembers</td><td>the gradients themselves (with sign)</td><td>the gradients' <em>squares</em> (size only)</td></tr>
+<tr><td>lives in the update as</td><td>the <span class="key">numerator</span> — what direction, how hard</td><td>the <span class="key">denominator</span> — the per-parameter yardstick</td></tr>
+<tr><td>fixes</td><td>zigzag &amp; noise over <em>time</em>; starved slow directions</td><td>scale spread across <em>parameters</em></td></tr>
+<tr><td>character</td><td>a ball: bold, can overshoot</td><td>an equalizer: calm, scale-blind</td></tr>
+</table>
+<p>They are not rivals — they answer different questions ("<em>which way is the trend?</em>" vs "<em>how big is a normal step for this particular weight?</em>") and they compose naturally: keep an EMA of gradients for the numerator, an EMA of squared gradients for the denominator, divide. That composition — plus one honesty patch for young EMAs (your 0.3162) — has a name, and it's the default optimizer of the deep-learning era.</p>
+</div>
+
+<div class="card purple">
+<h3>Carry forward</h3>
+<ul>
+<li>The wish: <span class="key">every parameter moves ~lr; its gradient picks direction, not distance.</span></li>
+<li>AdaGrad grants it by dividing by √(sum of g²) — but the infinite memory makes lr decay to zero on a schedule set by time, not progress.</li>
+<li>RMSProp swaps in an EMA: divide by the <span class="key">recent</span> RMS gradient. Equalizes 1000× scale spreads (real: both steps 0.3162).</li>
+<li>Why history, not today: dividing by |today's g| is sign descent — can't slow down at the minimum, can't see spikes, extracts E[sign(g)] which noise can pin to zero. The memory is the cure, not a convenience.</li>
+<li>ε = the dust threshold: above it, gradients are equalized to ~lr; below it, they're ignored. Also the guard against a permanent 0/0 → NaN.</li>
+<li><span class="key">The honest cost:</span> AdaGrad's 1/√t is a brake (it lands: 1.7e−20 by t=1,000) and RMSProp gave it away — so RMSProp inherits page 0's Failure 1 and orbits at exactly <span class="key">|w| = lr/2</span>, sign descent's own limit cycle. Not "never slowed down" but "slowed down, then the EMA forgot why."</li>
+<li>Therefore: <span class="key">an adaptive optimizer does not anneal itself — the lr schedule is that brake, restored under your control.</span> Noisy bowl, decay alone: 0.062 → 0.015.</li>
+<li>The loose thread: a young EMA underestimates → first steps are ~3.16× too big. Carry the number 0.3162 into the next chapter.</li>
+</ul>
+</div>
+<a class="nx" href="4_adam.html">Chapter 4: Adam — assembled, traced, verified →</a>
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page'),nav=document.getElementById('nav');
+pages.forEach((p,i)=>{
+  const b=document.createElement('button');
+  b.textContent=p.dataset.t;
+  b.onclick=()=>go(i);
+  if(i===0)b.classList.add('on');
+  nav.appendChild(b);
+});
+function go(n){
+  pages.forEach((p,i)=>p.classList.toggle('on',i===n));
+  nav.querySelectorAll('button').forEach((b,i)=>{
+    b.classList.remove('on');
+    if(i<n)b.classList.add('done');
+    else b.classList.remove('done');
+    if(i===n)b.classList.add('on');
+  });
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+</script>
+</body>
+</html>

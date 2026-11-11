@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VAE Ch3: YouTube Shorts — Supervised Latents</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:860px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 12px;border:1px solid #333;text-align:center;font-size:.88em}
+th{background:#1a1a3a;color:#4fc3f7}
+td{text-align:left}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',Consolas,monospace;font-size:.85em;line-height:1.8}
+.math .line{margin:2px 0;display:block}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math .cmt{color:#6a9955}.math .val{color:#b5cea8}.math .lbl{color:#9cdcfe}
+.key{color:#ffb74d;font-weight:600}
+.vs{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:10px 0}
+@media(max-width:650px){.vs{grid-template-columns:1fr}}
+/* routing diagram */
+.routing{display:flex;flex-direction:column;gap:8px;margin:14px 0}
+.route-row{display:flex;align-items:center;gap:0}
+.latent-box{padding:8px 16px;border-radius:6px;font-family:monospace;font-size:.85em;font-weight:700;min-width:140px;text-align:center}
+.route-line{flex:1;height:2px;position:relative;margin:0 4px}
+.route-line::after{content:'►';position:absolute;right:-2px;top:-8px;font-size:.8em}
+.decoder-box{padding:8px 14px;border-radius:6px;font-size:.82em;min-width:160px;text-align:center}
+.label-box{padding:8px 14px;border-radius:6px;font-size:.78em;min-width:140px;text-align:center;color:#888;border:1px dashed #333}
+.arrow-small{color:#555;font-size:1.1em;margin:0 6px}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+<h1>VAE Course — Chapter 3: YouTube Shorts</h1>
+<p class="sub">How to make latents mean what you want — supervised routing</p>
+<div class="nav" id="nav"></div>
+
+<!-- PAGE 0 -->
+<div class="page on" data-t="0. AE vs MLP vs VAE">
+<h2>Autoencoder vs MLP vs VAE — What's the Actual Difference?</h2>
+
+<div class="card blue">
+<h3>Autoencoder — compression + reconstruction of the SAME thing</h3>
+<p>An autoencoder compresses input into a small bottleneck, then reconstructs the <strong>exact same input</strong> as output. The only goal is: output ≈ input.</p>
+<div class="math">
+<div class="line"><span class="cmt">// Image autoencoder (Chapter 1 of this course):</span></div>
+<div class="line"><span class="lbl">input</span>:  [1, 1, 1, 1]  <span class="cmt">// "bright" 2x2 image</span></div>
+<div class="line"><span class="lbl">encoder</span>: [1,1,1,1] → z = 0.8  <span class="cmt">// squeeze to 1 number</span></div>
+<div class="line"><span class="lbl">decoder</span>: 0.8 → [0.97, 0.98, 0.96, 0.97]  <span class="cmt">// reconstruct the SAME image</span></div>
+<div class="line"><span class="lbl">loss</span> = MSE(input, output) <span class="cmt">// how well did we reconstruct?</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// The "auto" means self. It encodes itself, then decodes itself.</span></div>
+<div class="line"><span class="cmt">// Not predicting a label. Not classifying. Just: compress and recover.</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3>Is autoencoder just an MLP? Almost — the bottleneck is the difference</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Plain MLP (e.g. image classifier):</span></div>
+<div class="line">[1,1,1,1] → [hidden: 32 nodes] → [output: "cat" or "dog"]</div>
+<div class="line"><span class="cmt">// No bottleneck. 32 nodes can use all information freely.</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Autoencoder:</span></div>
+<div class="line">[1,1,1,1] → [encoder: 16 nodes] → [bottleneck: 1 node] → [decoder: 16 nodes] → [1,1,1,1]</div>
+<div class="line"><span class="cmt">// Same math as MLP (weights, activations, backprop).</span></div>
+<div class="line"><span class="cmt">// BUT: the bottleneck forces compression.</span></div>
+<div class="line"><span class="cmt">// All information about the input must pass through 1 number.</span></div>
+<div class="line"><span class="cmt">// The network learns what's important enough to keep.</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// So: autoencoder = MLP with a narrow middle + reconstruction loss.</span></div>
+<div class="line"><span class="cmt">// The bottleneck + reconstruction objective is what makes it special.</span></div>
+</div>
+</div>
+
+<div class="card orange">
+<h3>What VAE adds on top of autoencoder</h3>
+<p>Autoencoder bottleneck: a single crisp number per input.</p>
+<p style="margin-top:4px">VAE bottleneck: a <strong>distribution</strong> (mean + std) per input. Then sample from it.</p>
+<div class="math">
+<div class="line"><span class="cmt">// Autoencoder: encoder → z = 0.8 (always exactly 0.8 for "bright")</span></div>
+<div class="line"><span class="cmt">// VAE:         encoder → μ=0.8, σ=0.2 → sample z ~ N(0.8, 0.04)</span></div>
+<div class="line"><span class="cmt">//              maybe z=0.75 this time, z=0.91 next time</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Why does this matter?</span></div>
+<div class="line"><span class="cmt">//</span></div>
+<div class="line"><span class="cmt">// Autoencoder latent space:  "bright" → exactly 0.8 (point)</span></div>
+<div class="line"><span class="cmt">// Nothing at z=0.79 or z=0.81 was ever trained.</span></div>
+<div class="line"><span class="cmt">// Sample a random z → likely garbage.</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// VAE latent space: "bright" → cloud around 0.8 (distribution)</span></div>
+<div class="line"><span class="cmt">// Decoder sees z=0.75, 0.81, 0.91, 0.73... all during training.</span></div>
+<div class="line"><span class="cmt">// Learns what to do everywhere in that region.</span></div>
+<div class="line"><span class="cmt">// Sample a random z → smooth, valid output.</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// The VAE cloud also forces neighboring inputs to overlap:</span></div>
+<div class="line"><span class="cmt">// "bright" cloud at z≈0.8 bleeds into "half" cloud at z≈0.0</span></div>
+<div class="line"><span class="cmt">// → decoder learns the whole space between them</span></div>
+<div class="line"><span class="cmt">// → smooth interpolation, no gaps</span></div>
+</div>
+</div>
+
+<div class="card green">
+<h3>The three architectures side by side</h3>
+<table>
+<tr><th></th><th>MLP</th><th>Autoencoder</th><th>VAE (standard)</th><th>YouTube system</th></tr>
+<tr><td>Math</td><td>weights × activation</td><td>same</td><td>same + sampling</td><td>same + sampling</td></tr>
+<tr><td>Bottleneck?</td><td>No</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+<tr><td>Bottleneck is</td><td>—</td><td>a number</td><td>a distribution (μ, σ)</td><td>a distribution (μ, σ)</td></tr>
+<tr><td>Output</td><td>label</td><td>reconstruction of input</td><td style="color:#4caf50">reconstruction of input</td><td style="color:#ffb74d">labels (watch time, likes) — NOT input</td></tr>
+<tr><td>Loss</td><td>cross-entropy vs label</td><td>MSE vs input</td><td>MSE vs input + KL</td><td>MSE/BCE vs labels + KL</td></tr>
+<tr><td>Can generate?</td><td>No</td><td style="color:#ef5350">No</td><td style="color:#4caf50">Yes</td><td style="color:#ef5350">No (not its goal)</td></tr>
+<tr><td>Proper name</td><td>MLP</td><td>Autoencoder</td><td>VAE</td><td style="color:#ffb74d">Variational Information Bottleneck</td></tr>
+</table>
+<p style="margin-top:8px">You're right — the YouTube system's decoder predicts <strong>labels</strong> (watch time, likes), not a reconstruction of the input. Standard VAE does reconstruct the input. This system borrows VAE's tools (μ/σ, reparameterization, KL) but uses them for supervised prediction. The correct name is <strong>variational information bottleneck</strong>. The "VAE" label they use is loose.</p>
+</div>
+
+<button class="nx" onclick="go(1)">Next: So how do the 3 numbers get their meaning? &#x2192;</button>
+</div>
+
+<!-- PAGE 1 -->
+<div class="page" data-t="1. Aren't latents random?">
+<h2>Wait — Aren't the 3 Numbers Random?</h2>
+
+<div class="card orange">
+<h3>The right question to ask</h3>
+<p>In a standard VAE (Chapter 2), the latents organize themselves however the network finds useful. You get z1, z2, z3 — but you have no idea what they mean. z1 might encode "brightness" or "aspect ratio" or something uninterpretable.</p>
+<p style="margin-top:8px">YouTube's system claims z_passive = "how much was consumed", z_active = "how actively engaged", z_valence = "positive or negative." But how? If it's a VAE, aren't those 3 numbers just random?</p>
+</div>
+
+<div class="card blue">
+<h3>The answer: routing forces semantics</h3>
+<p>In a standard VAE, all latents see all outputs:</p>
+<div class="math">
+<div class="line"><span class="cmt">// Standard VAE: all latents → one decoder → all outputs</span></div>
+<div class="line">[z1, z2, z3] → decoder → [watch_time, likes, dislikes, shares]</div>
+<div class="line"><span class="cmt">// z1, z2, z3 can mean ANYTHING. No constraint on semantics.</span></div>
+</div>
+<p style="margin-top:8px">In this system, each latent is routed to <strong>only one specific decoder</strong> predicting <strong>only one specific label</strong>:</p>
+<div class="math">
+<div class="line"><span class="lbl">z_passive</span> → watch_time decoder only → predicts: how much did they watch?</div>
+<div class="line"><span class="lbl">z_active</span>  → response decoder only  → predicts: did they engage at all?</div>
+<div class="line"><span class="lbl">z_valence</span> → sentiment decoder only → predicts: was engagement positive?</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Each latent has no choice — it must encode what its decoder needs.</span></div>
+</div>
+</div>
+<button class="nx" onclick="go(2)">Next: Why routing forces meaning &#x2192;</button>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page" data-t="2. Why Routing Works">
+<h2>Why the Architecture Forces Each Latent to Mean What It Should</h2>
+
+<div class="card blue">
+<h3>Think through z_passive step by step</h3>
+<div class="math">
+<div class="line"><span class="cmt">// z_passive is the ONLY input to the watch-time decoder.</span></div>
+<div class="line"><span class="cmt">// The decoder sees nothing else — no video features, no user history.</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Training example: user watched 90% of a video.</span></div>
+<div class="line"><span class="cmt">// Encoder outputs: z_passive = 0.2 (low)</span></div>
+<div class="line"><span class="lbl">watch_time_decoder</span>(z_passive=0.2) → predicts: 15% watch ratio</div>
+<div class="line"><span class="lbl">ground_truth</span>: 90% watch ratio</div>
+<div class="line"><span class="lbl">loss</span> = (15% - 90%)² = large!</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Backprop: gradient flows from loss → decoder → z_passive</span></div>
+<div class="line"><span class="cmt">// "z_passive needs to be HIGHER to predict 90% watch ratio"</span></div>
+<div class="line"><span class="cmt">// → encoder is forced to output a higher z_passive for this user</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Repeat for 100M training examples.</span></div>
+<div class="line"><span class="cmt">// z_passive converges to: "high when user watched a lot, low when they didn't"</span></div>
+<div class="line"><span class="cmt">// Not because we told it to. Because that's the ONLY way to minimize loss.</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3>Same logic for z_valence</h3>
+<div class="math">
+<div class="line"><span class="cmt">// z_valence is the ONLY input to the sentiment decoder.</span></div>
+<div class="line"><span class="cmt">// Training example: user clicked Like.</span></div>
+<div class="line"><span class="cmt">// Encoder outputs: z_valence = -1.5 (negative)</span></div>
+<div class="line"><span class="lbl">sentiment_decoder</span>(z_valence=-1.5) → predicts: P(liked|responded) = 0.18</div>
+<div class="line"><span class="lbl">ground_truth</span>: user liked = 1.0</div>
+<div class="line"><span class="lbl">loss</span> = large</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Backprop: "z_valence needs to be POSITIVE to predict a like"</span></div>
+<div class="line"><span class="cmt">// → encoder forced to output positive z_valence when user liked</span></div>
+<div class="line"><span class="cmt">// → encoder forced to output negative z_valence when user disliked</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// After training: z_valence > 0 means "positive sentiment", < 0 means "negative"</span></div>
+<div class="line"><span class="cmt">// Emerged from data. Not hand-coded. But not random either.</span></div>
+</div>
+</div>
+
+<div class="card green">
+<h3>The contrast with standard VAE</h3>
+<div class="vs">
+  <div class="card" style="border-color:#ef5350">
+    <div style="color:#ef5350;font-weight:700;margin-bottom:6px">Standard VAE</div>
+    <p style="font-size:.85em">All latents → one big decoder → all outputs.<br><br>z1 might encode "redness of thumbnail" — it doesn't matter, as long as the decoder can reconstruct the image from all 3 combined.</p>
+  </div>
+  <div class="card" style="border-color:#4caf50">
+    <div style="color:#4caf50;font-weight:700;margin-bottom:6px">YouTube Supervised VAE</div>
+    <p style="font-size:.85em">Each latent → its own decoder → its own specific label.<br><br>z_passive MUST encode watch behavior because it's the ONLY thing its decoder can see.</p>
+  </div>
+</div>
+</div>
+<button class="nx" onclick="go(3)">Next: The routing diagram &#x2192;</button>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page" data-t="3. The Architecture">
+<h2>The Full Architecture — Every Connection Shown</h2>
+
+<div class="card blue">
+<h3>Encoder: features → 3 latent distributions</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Input: user features + video features + context</span></div>
+<div class="line">encoder(features) → [μ_passive, σ_passive, μ_active, σ_active, μ_valence, σ_valence]</div>
+<div class="line"><span class="cmt">//                     6 numbers: mean + std for each of the 3 latents</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Reparameterization (same as Chapter 2):</span></div>
+<div class="line"><span class="lbl">z_passive</span> = μ_passive + σ_passive × ε₁  <span class="cmt">// ε₁ ~ N(0,1)</span></div>
+<div class="line"><span class="lbl">z_active</span>  = μ_active  + σ_active  × ε₂</div>
+<div class="line"><span class="lbl">z_valence</span> = μ_valence + σ_valence × ε₃</div>
+</div>
+</div>
+
+<div class="card">
+<h3>Routing — what connects to what</h3>
+<div class="routing">
+  <div class="route-row">
+    <div class="latent-box" style="background:#1a3a5c;border:2px solid #4fc3f7;color:#4fc3f7">z_passive</div>
+    <div class="route-line" style="background:#4fc3f7"></div>
+    <span style="color:#4fc3f7;font-size:1.1em;margin:0 4px">→</span>
+    <div class="decoder-box" style="background:#0d1b2a;border:1px solid #4fc3f7;color:#4fc3f7">watch_time_decoder</div>
+    <span class="arrow-small">→</span>
+    <div class="label-box">P(WTR ≥ 10%), P(WTR ≥ 20%), ...</div>
+  </div>
+  <div class="route-row">
+    <div class="latent-box" style="background:#2a1a3a;border:2px solid #ce93d8;color:#ce93d8">z_active</div>
+    <span style="color:#ce93d8;font-size:1.1em;margin:0 4px">→</span>
+    <div class="decoder-box" style="background:#1a0a2a;border:1px solid #ce93d8;color:#ce93d8">response_decoder</div>
+    <span class="arrow-small">→</span>
+    <div class="label-box">P(did user respond at all?)</div>
+  </div>
+  <div class="route-row">
+    <div class="latent-box" style="background:#1a3a1a;border:2px solid #4caf50;color:#4caf50">z_valence</div>
+    <span style="color:#4caf50;font-size:1.1em;margin:0 4px">→</span>
+    <div class="decoder-box" style="background:#0a1a0a;border:1px solid #4caf50;color:#4caf50">sentiment_decoder</div>
+    <span class="arrow-small">→</span>
+    <div class="label-box">P(like | responded)</div>
+  </div>
+  <div class="route-row">
+    <div class="latent-box" style="background:#2a1a3a;border:2px solid #ce93d8;color:#ce93d8">z_active</div>
+    <span style="color:#888;font-size:.8em;margin:0 8px">+</span>
+    <div class="latent-box" style="background:#1a3a1a;border:2px solid #4caf50;color:#4caf50">z_valence</div>
+    <span style="color:#888;font-size:1.1em;margin:0 4px">→</span>
+    <div class="decoder-box" style="background:#0a1a0a;border:1px solid #4caf50;color:#888">actions_decoder</div>
+    <span class="arrow-small">→</span>
+    <div class="label-box">P(share), P(subscribe)</div>
+  </div>
+</div>
+<p style="font-size:.82em;color:#888;margin-top:6px">Note: the actions decoder uses BOTH z_active and z_valence — sharing requires both engagement intensity and positive sentiment.</p>
+</div>
+
+<div class="card orange">
+<h3>What the "VAE" part actually adds (vs plain supervised learning)</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Could we just have: encoder → 3 numbers → 3 decoders (no sampling)?</span></div>
+<div class="line"><span class="cmt">// Yes. That would be a regular autoencoder with supervised routing.</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// The VAE part (μ, σ, reparameterization) adds:</span></div>
+<div class="line"><span class="cmt">// 1. Smooth latent space — similar users get similar z values</span></div>
+<div class="line"><span class="cmt">// 2. KL regularization — keeps latents well-behaved, prevents collapse</span></div>
+<div class="line"><span class="cmt">// 3. Uncertainty — σ captures "how confident are we about this user's state?"</span></div>
+<div class="line"><span class="cmt">//    High σ_passive = "we've seen this user very little, uncertain about their consumption"</span></div>
+<div class="line"><span class="cmt">//    Low σ_passive  = "we know this user well, confident prediction"</span></div>
+</div>
+</div>
+<button class="nx" onclick="go(4)">Next: The debiasing trick &#x2192;</button>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page" data-t="4. Debiasing">
+<h2>The Debiasing Trick — Separating Signal from Noise</h2>
+
+<div class="card orange">
+<h3>The problem: raw watch time is misleading</h3>
+<div class="math">
+<div class="line"><span class="cmt">// "User watched 90 seconds." Good or bad?</span></div>
+<div class="line"><span class="cmt">//   30-second video → incredible (3× rewatch)</span></div>
+<div class="line"><span class="cmt">//  180-second video → bad (watched only half)</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Raw watch time is confounded by video length.</span></div>
+<div class="line"><span class="cmt">// Also confounded by: time of day, user's historical behavior, device type...</span></div>
+<div class="line"><span class="cmt">// These are "bias features" — things that affect watch time</span></div>
+<div class="line"><span class="cmt">// but have NOTHING to do with whether this specific user liked this specific video.</span></div>
+</div>
+</div>
+
+<div class="card blue">
+<h3>The dual-tower decoder — every number shown</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Each decoder has TWO paths:</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="lbl">z_passive</span>         → LatentTower(z_passive)     → residual prediction</div>
+<div class="line"><span class="lbl">bias_features</span>     → BaselineTower(bias)         → baseline prediction</div>
+<div class="line"><span class="cmt">//  (video length,        stop_gradient!</span></div>
+<div class="line"><span class="cmt">//   user avg WT,</span></div>
+<div class="line"><span class="cmt">//   time of day)</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="hl">final_logit = LatentTower(z_passive) + stop_gradient(BaselineTower(bias))</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// stop_gradient = treat baseline output as a constant during backprop.</span></div>
+<div class="line"><span class="cmt">// Gradients flow ONLY through z_passive, not through bias_features.</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3>Why stop_gradient is the key</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Without stop_gradient:</span></div>
+<div class="line"><span class="cmt">// Both z_passive AND bias_features compete to explain watch time.</span></div>
+<div class="line"><span class="cmt">// The encoder learns to put video-length info into z_passive.</span></div>
+<div class="line"><span class="cmt">// z_passive ends up encoding "how long was the video" not "how much did user value it"</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// With stop_gradient:</span></div>
+<div class="line"><span class="cmt">// BaselineTower has already "explained" the predictable part (video length, etc.).</span></div>
+<div class="line"><span class="cmt">// The only gradient the encoder receives is for the RESIDUAL — the unexplained part.</span></div>
+<div class="line"><span class="cmt">// z_passive is forced to capture: "how much MORE or LESS did this user watch</span></div>
+<div class="line"><span class="cmt">//  than we'd expect given the video length and their history?"</span></div>
+</div>
+</div>
+
+<div class="card green">
+<h3>Concrete example — what z_passive actually captures</h3>
+<div class="math">
+<div class="line"><span class="lbl">video</span>: 120s, average user at 8 PM</div>
+<div class="line"><span class="lbl">BaselineTower prediction</span>: 45s watch time</div>
+<div class="line"><span class="cmt">// "For a 120s video with this user profile at 8 PM, we'd normally expect 45s"</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="lbl">User A</span> actually watched: 80s</div>
+<div class="line"><span class="cmt">// residual = 80 - 45 = +35s → z_passive = HIGH</span></div>
+<div class="line"><span class="cmt">// "This user valued this video 35s more than expected"</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="lbl">User B</span> actually watched: 20s</div>
+<div class="line"><span class="cmt">// residual = 20 - 45 = -25s → z_passive = LOW</span></div>
+<div class="line"><span class="cmt">// "This user valued this video 25s less than expected"</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// z_passive no longer cares that the video was 120s.</span></div>
+<div class="line"><span class="cmt">// It only captures the USER-SPECIFIC deviation from what was predictable.</span></div>
+</div>
+</div>
+<button class="nx" onclick="go(5)">Next: Scoring and results &#x2192;</button>
+</div>
+
+<!-- PAGE 4 -->
+<div class="page" data-t="4. Scoring & Results">
+<h2>The Final Scoring Formula and What It Achieved</h2>
+
+<div class="card">
+<h3>Old formula vs new formula</h3>
+<div class="math">
+<div class="line"><span class="cmt">// OLD (7+ hyperparameters, 13 separate heads):</span></div>
+<div class="line">Score = (1.1×SAT_WT + 0.05×Novel_WT + 0.45×WT - w×VLEN) × (pSat×pOffputting)^0.7</div>
+<div class="line"><span class="cmt">// Every term needs tuning. Adding a new signal = adding a new hyperparameter.</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// NEW (1 hyperparameter):</span></div>
+<div class="line"><span class="lbl">GoodLift</span>  = sigmoid(z_valence) × z_passive</div>
+<div class="line"><span class="lbl">GoodLogWT</span> = log(sigmoid(z_valence) × pWT + 1)</div>
+<div class="line"><span class="lbl">VLC</span>       = 0.005 × video_length</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="hl">Score = GoodLift + GoodLogWT - VLC</span></div>
+</div>
+</div>
+
+<div class="card blue">
+<h3>Why GoodLift = sigmoid(z_valence) × z_passive makes intuitive sense</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Case 1: watched a lot AND liked it</span></div>
+<div class="line"><span class="lbl">z_passive</span> = 3.0,  <span class="lbl">z_valence</span> = 2.0</div>
+<div class="line">GoodLift = sigmoid(2.0) × 3.0 = 0.88 × 3.0 = <span class="val" style="color:#4caf50">2.64</span>  <span class="cmt">← high</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Case 2: watched a lot but DISLIKED it</span></div>
+<div class="line"><span class="lbl">z_passive</span> = 3.0,  <span class="lbl">z_valence</span> = -2.0</div>
+<div class="line">GoodLift = sigmoid(-2.0) × 3.0 = 0.12 × 3.0 = <span class="val" style="color:#ef5350">0.36</span>  <span class="cmt">← low despite watching!</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Case 3: didn't watch, neutral</span></div>
+<div class="line"><span class="lbl">z_passive</span> = 0.5,  <span class="lbl">z_valence</span> = 0.0</div>
+<div class="line">GoodLift = sigmoid(0.0) × 0.5 = 0.5 × 0.5 = <span class="val">0.25</span>  <span class="cmt">← medium</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// sigmoid(z_valence) = "how much of the passive consumption was valued?"</span></div>
+<div class="line"><span class="cmt">// If z_valence is negative (dislike), sigmoid squashes the passive score.</span></div>
+<div class="line"><span class="cmt">// This prevents "rage watching" from looking like positive engagement.</span></div>
+</div>
+</div>
+
+<div class="card green">
+<h3>What happened in production (real YouTube traffic)</h3>
+<table>
+<tr><th>Metric</th><th>Change</th><th>Why</th></tr>
+<tr><td>Valued Watch Time</td><td style="color:#4caf50;font-weight:700">+3.17%</td><td>Recommending videos users actually enjoy more</td></tr>
+<tr><td>Offputting Rate</td><td style="color:#4caf50;font-weight:700">-6.5%</td><td>z_valence catches negative sentiment separately</td></tr>
+<tr><td>Low-quality Impressions</td><td style="color:#4caf50;font-weight:700">-14.25%</td><td>Debiased latents don't just reward long videos</td></tr>
+<tr><td>Infrastructure Cost</td><td style="color:#4caf50;font-weight:700">-31%</td><td>3 latents vs 13 heads = simpler, cheaper</td></tr>
+<tr><td>Total Views</td><td style="color:#ef5350">-3.24%</td><td>Showing fewer but better videos (intentional)</td></tr>
+</table>
+<p style="margin-top:8px">Users see fewer videos, but each one is more satisfying. The system shifted from "maximize watch time" toward "maximize valued watch time."</p>
+</div>
+
+<div class="card">
+<h3>What this taught us about VAEs</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Chapter 2: standard VAE — latents are random, emerge from reconstruction</span></div>
+<div class="line"><span class="cmt">// Chapter 3: supervised VAE — latents are forced by routing + labeled targets</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// The "VAE" label covers a family of techniques:</span></div>
+<div class="line"><span class="cmt">// What they share: reparameterization trick, bottleneck, KL regularization</span></div>
+<div class="line"><span class="cmt">// What varies: HOW the latents are constrained</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Unsupervised VAE:   latents emerge from reconstruction signal alone</span></div>
+<div class="line"><span class="cmt">// Supervised VAE:     latents are routed to specific supervised decoders</span></div>
+<div class="line"><span class="cmt">// Disentangled VAE:   regularization forces latents to be independent</span></div>
+<div class="line"><span class="cmt">// Conditional VAE:    condition the decoder on external labels (class, text, etc.)</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// All use the same math. The architecture decides what the latents mean.</span></div>
+</div>
+</div>
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page'),nav=document.getElementById('nav');
+pages.forEach((p,i)=>{const b=document.createElement('button');b.textContent=p.dataset.t;b.onclick=()=>go(i);if(i===0)b.classList.add('on');nav.appendChild(b);});
+function go(n){pages.forEach((p,i)=>p.classList.toggle('on',i===n));nav.querySelectorAll('button').forEach((b,i)=>{b.classList.remove('on');if(i<n)b.classList.add('done');else b.classList.remove('done');if(i===n)b.classList.add('on');});window.scrollTo({top:0,behavior:'smooth'});}
+</script>
+</body></html>

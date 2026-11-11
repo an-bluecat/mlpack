@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 15: DAPO — Four Fixes That Turn GRPO Into a System</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:880px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 12px;border:1px solid #333;text-align:center;font-size:.88em}
+th{background:#1a1a3a;color:#4fc3f7}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',monospace;font-size:.85em;line-height:1.8;overflow-x:auto}
+.math .line{margin:2px 0;white-space:pre}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.math .kw{color:#c586c0}
+.key{color:#ffb74d;font-weight:600}
+details.more{background:#12122a;border:1px solid #2a2a4a;border-radius:10px;padding:10px 14px;margin:10px 0}
+details.more summary{cursor:pointer;color:#4fc3f7;font-size:.92em;font-weight:600}
+details.more[open] summary{margin-bottom:8px}
+.scroll{overflow-x:auto}
+.src{font-size:.82em;color:#888;margin-top:8px}
+svg text{font-family:'Segoe UI',system-ui,sans-serif}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+<h1>Chapter 15: DAPO</h1>
+<p class="sub">Read after <a href="7_grpo.html" style="color:#4fc3f7">chapter 7</a> and <a href="8_grpo_end_to_end.html" style="color:#4fc3f7">chapter 8</a>. Not a new algorithm — GRPO with four specific things fixed. The paper's value is that it measures what each fix is worth.</p>
+<div class="nav" id="nav"></div>
+
+<!-- ============================ PAGE 0 ============================ -->
+<div class="page on" data-t="0. The Setup">
+<h2>GRPO, Debugged Four Times</h2>
+
+<div class="card blue">
+<h3>What DAPO is, and what it is not</h3>
+<p>DAPO &mdash; <strong>D</strong>ecoupled Clip and <strong>D</strong>ynamic s<strong>A</strong>mpling <strong>P</strong>olicy <strong>O</strong>ptimization &mdash; is chapter 7&#x2019;s GRPO with four edits. There is no new estimator, no new theory. What makes the paper worth a chapter is that it <em>ablates</em>: it reports what each fix is individually worth on the same benchmark, which is rare and directly useful.</p>
+<div class="math">
+<div class="line"><span class="cmt">// Headline: Qwen2.5-32B base, AIME 2024 (avg@32)</span></div>
+<div class="line">DeepSeek-R1-Zero-Qwen-32B   <span class="val">47</span> points</div>
+<div class="line">DAPO                        <span class="val">50</span> points, using <span class="val">50%</span> of the training steps</div>
+</div>
+</div>
+
+<div class="card">
+<h3>The objective, diffed against chapter 7's GRPO</h3>
+<p>Only two things visibly change in the formula; the other two fixes live in how the batch is built and how the reward is computed.</p>
+<div class="math">
+<div class="line"><span class="cmt">// GRPO (chapter 7): average over responses, then over tokens</span></div>
+<div class="line">L = (1/G) &Sigma;<sub>i</sub> (1/|o<sub>i</sub>|) &Sigma;<sub>t</sub>  min( r<sub>i,t</sub>&middot;Â<sub>i</sub> ,  clip(r<sub>i,t</sub>, 1&minus;&epsilon;, 1+&epsilon;)&middot;Â<sub>i</sub> )  &minus; β&middot;KL</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// DAPO: one flat average over every token in the batch,</span></div>
+<div class="line"><span class="cmt">//       asymmetric clip bounds, and no KL term at all</span></div>
+<div class="line">L = <span class="hl">(1 / &Sigma;<sub>i</sub>|o<sub>i</sub>|)</span> &Sigma;<sub>i</sub> &Sigma;<sub>t</sub>  min( r<sub>i,t</sub>&middot;Â<sub>i</sub> , clip(r<sub>i,t</sub>, 1&minus;<span class="hl">&epsilon;_low</span>, 1+<span class="hl">&epsilon;_high</span>)&middot;Â<sub>i</sub> )</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// subject to:  0 &lt; |{ correct responses in the group }| &lt; G</span></div>
+<div class="line"><span class="cmt">//              (that constraint IS the dynamic sampling fix)</span></div>
+</div>
+</div>
+
+<div class="card purple">
+<h3>The four fixes, and where each one already appears in this course</h3>
+<div class="scroll"><table>
+<tr><th>Fix</th><th>Problem it solves</th><th>Deep dive already in</th></tr>
+<tr><td><strong>Clip-Higher</strong></td><td>entropy collapse &mdash; the policy goes deterministic and exploration dies</td><td><a href="13_production_atlas.html" style="color:#4fc3f7">ch. 13</a>, entropy collapse</td></tr>
+<tr><td><strong>Token-Level Loss</strong></td><td>tokens in long responses count for less, so length grows unchecked</td><td><a href="13_production_atlas.html" style="color:#4fc3f7">ch. 13</a>, length bias</td></tr>
+<tr><td><strong>Overlong Reward Shaping</strong></td><td>truncated-but-valid reasoning is scored as if it were wrong</td><td><a href="13_production_atlas.html" style="color:#4fc3f7">ch. 13</a>, truncation noise</td></tr>
+<tr><td><strong>Dynamic Sampling</strong></td><td>all-right or all-wrong groups produce exactly zero gradient</td><td><a href="10_difficulty_curriculum.html" style="color:#4fc3f7">ch. 10</a>, the dead group</td></tr>
+</table></div>
+<p style="margin-top:8px">This chapter is the <em>assembly</em>: how the four interact, and what the ablation says each is worth. When you want one of them in depth, follow the link.</p>
+</div>
+
+<div class="card green">
+<h3>The training setup all the numbers come from</h3>
+<div class="math">
+<div class="line">model            Qwen2.5-32B (base, not instruct)</div>
+<div class="line">prompt batch     <span class="val">512</span> prompts</div>
+<div class="line">group size G     <span class="val">16</span> responses per prompt</div>
+<div class="line">max generation   <span class="val">20,480</span> tokens</div>
+<div class="line">optimizer        AdamW, constant LR <span class="val">1e-6</span>, 20-step linear warm-up</div>
+<div class="line">reward           <span class="val">verifier</span> &mdash; is the final answer correct? 1 or 0</div>
+</div>
+<p style="margin-top:6px">Note the reward source: a <strong>verifier</strong>, not a reward model. That single fact is what licenses the most surprising edit in the list &mdash; deleting the KL leash &mdash; and the last tab explains why.</p>
+</div>
+
+<button class="nx" onclick="go(1)">Next: Fix 1 &mdash; Clip-Higher &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 1 ============================ -->
+<div class="page" data-t="1. Clip-Higher">
+<h2>Fix 1 — Clip-Higher: Stop Strangling Rare Tokens</h2>
+
+<div class="card red">
+<h3>Step 1 — the disease: entropy collapse</h3>
+<p>Partway into a GRPO run, the policy&#x2019;s output distribution sharpens: it becomes very confident about each next token. That sounds like learning, and it kills the run. Chain it out:</p>
+<div class="math">
+<div class="line"><span class="cmt">// (a) the policy becomes near-deterministic</span></div>
+<div class="line"><span class="cmt">// (b) so all G = 16 sampled responses come out nearly identical</span></div>
+<div class="line"><span class="cmt">// (c) so they all get the same reward</span></div>
+<div class="line"><span class="cmt">// (d) so the group's std = 0  ->  every advantage = 0</span></div>
+<div class="line"><span class="cmt">// (e) so the gradient is zero. Training has stopped.</span></div>
+</div>
+<p style="margin-top:6px">Steps (c)&ndash;(e) are exactly chapter 7&#x2019;s advantage arithmetic and chapter 10&#x2019;s dead group. Entropy collapse is a <em>second</em>, sneakier way to manufacture dead groups: not because the problem is too easy or too hard, but because the model stopped being able to disagree with itself.</p>
+</div>
+
+<div class="card">
+<h3>Step 2 — why the clip is the culprit, on numbers</h3>
+<p>The clip bounds a <em>ratio</em>, which means the headroom it grants is <strong>multiplicative</strong>. Take two tokens on opposite ends of the distribution and ask what the standard &epsilon; = 0.2 permits in one update:</p>
+<div class="scroll"><table>
+<tr><th>token</th><th>p_old</th><th>ceiling = p_old &times; 1.2</th><th>absolute headroom</th></tr>
+<tr><td>rare / exploratory (e.g. "wait", "recheck")</td><td>0.01</td><td>0.012</td><td style="color:#ef5350"><strong>+0.002</strong></td></tr>
+<tr><td>confident / already-preferred</td><td>0.90</td><td>1.08 &rarr; capped at 1.0</td><td>+0.10</td></tr>
+</table></div>
+<p style="margin-top:6px">A rare token may increase its probability by <strong>0.002 per update</strong>. For it to become a real option it needs to climb by orders of magnitude, and the clip rations that climb into vanishing slices. Meanwhile the confident token is not constrained by the clip at all &mdash; its ceiling of 1.08 is above the maximum a probability can reach anyway.</p>
+<p style="margin-top:6px"><span class="key">So the symmetric clip is not symmetric in effect.</span> It barely touches tokens the model already likes and severely rations the ones it might learn to like. That is a ratchet toward determinism.</p>
+</div>
+
+<div class="card green">
+<h3>Step 3 — the fix: decouple the two bounds</h3>
+<div class="math">
+<div class="line"><span class="cmt">// GRPO / PPO: one epsilon for both sides</span></div>
+<div class="line">clip( ratio, 1 &minus; <span class="val">0.2</span>, 1 + <span class="val">0.2</span> )</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// DAPO: raise ONLY the ceiling</span></div>
+<div class="line">clip( ratio, 1 &minus; <span class="val">&epsilon;_low</span>, 1 + <span class="val">&epsilon;_high</span> )   <span class="cmt">// 0.2 and 0.28</span></div>
+</div>
+<p style="margin-top:6px">What that buys the rare token:</p>
+<div class="scroll"><table>
+<tr><th>token</th><th>ceiling at 1.2</th><th>ceiling at 1.28</th><th>headroom change</th></tr>
+<tr><td>p_old = 0.01</td><td>0.0120 (+0.0020)</td><td>0.0128 (+0.0028)</td><td style="color:#4caf50"><strong>+40% more room to grow</strong></td></tr>
+<tr><td>p_old = 0.90</td><td>1.08 &rarr; capped</td><td>1.152 &rarr; capped</td><td>no change &mdash; still not the binding limit</td></tr>
+</table></div>
+<p style="margin-top:6px">The asymmetry is the whole point: raising the ceiling is a targeted gift to low-probability tokens, because they are the only ones the ceiling was actually binding.</p>
+</div>
+
+<div class="card orange">
+<h3>Step 4 — why the FLOOR stays at 0.2</h3>
+<p>Ask the obvious next question: if raising the ceiling helps, why not lower the floor too? Because the two bounds do different jobs. Chapter 5 tab 2 established the clip as a one-sided brake per sample &mdash; the ceiling limits how fast something can be <em>promoted</em>, the floor limits how fast something can be <em>suppressed</em>. Loosening the floor would let the model delete tokens from its vocabulary faster, which pushes entropy <em>down</em>. That is the direction of the disease, not the cure.</p>
+</div>
+
+<button class="nx" onclick="go(2)">Next: Fix 2 &mdash; token-level loss &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 2 ============================ -->
+<div class="page" data-t="2. Token-Level Loss">
+<h2>Fix 2 — Token-Level Loss: One Token, One Vote</h2>
+
+<div class="card blue">
+<h3>Step 1 — spot the nested average in GRPO</h3>
+<div class="math">
+<div class="line">L = ( 1/G ) &Sigma;<sub>i</sub>  <span class="hl">( 1/|o<sub>i</sub>| ) &Sigma;<sub>t</sub></span>  loss(token t of response i)</div>
+<div class="line">     └── outer: average over the G responses</div>
+<div class="line">              └── inner: average over THAT response's tokens</div>
+</div>
+<p style="margin-top:6px">Every response contributes exactly <code>1/G</code> of the total loss &mdash; a 10-token answer and a 1000-token answer are equal citizens. That sounds fair. Work out what it means <em>per token</em> and it stops sounding fair.</p>
+</div>
+
+<div class="card red">
+<h3>Step 2 — the smallest example: G = 2, lengths 10 and 100</h3>
+<div class="scroll"><table>
+<tr><th></th><th>response A (10 tokens)</th><th>response B (100 tokens)</th></tr>
+<tr><td>weight of the whole response</td><td>1/2 = 0.5</td><td>1/2 = 0.5</td></tr>
+<tr><td><strong>weight of ONE token</strong></td><td>0.5 &times; 1/10 = <strong>0.05</strong></td><td>0.5 &times; 1/100 = <strong>0.005</strong></td></tr>
+</table></div>
+<div class="math">
+<div class="line">0.05 / 0.005 = <span class="val">10&times;</span></div>
+<div class="line"><span class="cmt">// A token inside the LONG response has one TENTH the influence</span></div>
+<div class="line"><span class="cmt">// of a token inside the short one. Its length is the only reason.</span></div>
+</div>
+</div>
+
+<div class="card orange">
+<h3>Step 3 — why that specific bias is dangerous</h3>
+<p>Now ask where degenerate text lives. Repetition, rambling, abandoned reasoning, gibberish after a wrong turn &mdash; these appear in the <em>long</em> responses, essentially by definition. So the nested average under-weights exactly the tokens that most need punishing:</p>
+<div class="math">
+<div class="line"><span class="cmt">// a 1000-token response that degenerates into repetition gets its</span></div>
+<div class="line"><span class="cmt">// negative advantage divided across 1000 tokens -> each token barely</span></div>
+<div class="line"><span class="cmt">// moves -> the repetition pattern is nearly unpunished</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Observed consequence: response length and entropy climb unhealthily,</span></div>
+<div class="line"><span class="cmt">// with no matching accuracy gain.</span></div>
+</div>
+</div>
+
+<div class="card green">
+<h3>Step 4 — the fix: one flat average over the batch</h3>
+<div class="math">
+<div class="line">L = <span class="hl">( 1 / &Sigma;<sub>i</sub>|o<sub>i</sub>| )</span> &Sigma;<sub>i</sub> &Sigma;<sub>t</sub>  loss(token t of response i)</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Same example: total tokens = 10 + 100 = 110</span></div>
+<div class="line">weight of EVERY token = 1/110 = <span class="val">0.00909</span>   <span class="cmt">// identical for both</span></div>
+</div>
+<p style="margin-top:6px">Follow the consequence for whole responses, because it is the honest trade:</p>
+<div class="scroll"><table>
+<tr><th></th><th>sample-level (GRPO)</th><th>token-level (DAPO)</th></tr>
+<tr><td>response A total weight</td><td>0.500</td><td>10/110 = 0.091</td></tr>
+<tr><td>response B total weight</td><td>0.500</td><td>100/110 = 0.909</td></tr>
+</table></div>
+<p style="margin-top:6px">So long responses now dominate the loss in proportion to their length. That is intentional: a 100-token response contains 100 decisions, and each deserves the same vote as any other decision. "One response, one vote" was the arbitrary choice; "one token, one vote" is the one that matches where the learning signal actually lives.</p>
+<p class="src">Chapter 13 lists the competing cures for the same bias &mdash; Dr. GRPO drops the length divisor entirely, Magistral normalizes at group level. TRL now ships a <code>loss_type</code> switch and flags the plain version for exactly this reason.</p>
+</div>
+
+<button class="nx" onclick="go(3)">Next: Fix 3 &mdash; overlong reward shaping &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 3 ============================ -->
+<div class="page" data-t="3. Overlong Shaping">
+<h2>Fix 3 — Overlong Reward Shaping: Stop Punishing Good Reasoning for Being Cut Off</h2>
+
+<div class="card red">
+<h3>Step 1 — the false negative</h3>
+<p>Generation has a hard cap (here 20,480 tokens). A response that hits it gets truncated mid-sentence, so it contains no final answer, so the verifier returns 0. Now look at what the model is told:</p>
+<div class="math">
+<div class="line">response: 20,480 tokens of <span class="val">correct, careful reasoning</span>, cut off</div>
+<div class="line">          before it could write the final line</div>
+<div class="line">verifier: <span class="val">0</span>   <span class="cmt">// no answer found</span></div>
+<div class="line">signal:   "everything you just did was wrong"</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// But the reasoning may have been excellent. The 0 is an artifact</span></div>
+<div class="line"><span class="cmt">// of the length cap, not a judgement about the reasoning.</span></div>
+</div>
+<p style="margin-top:6px">This is <strong>reward noise</strong>: a label that is wrong for a reason unrelated to what it claims to measure. And it is not rare &mdash; long-CoT training pushes responses toward the cap by design.</p>
+</div>
+
+<div class="card green">
+<h3>Step 2 — remedy A: Overlong Filtering (just delete them)</h3>
+<div class="math">
+<div class="line"><span class="cmt">// If a response was truncated, mask it out of the loss entirely.</span></div>
+<div class="line"><span class="cmt">// Not "reward 0" &mdash; NO gradient contribution at all.</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Rationale: a noisy label is worse than no label.</span></div>
+</div>
+<p style="margin-top:6px">In the ablation this single change is worth <strong>+6 AIME points</strong> (30 &rarr; 36) &mdash; the largest jump of any fix except dynamic sampling. Removing wrong labels beat every clever addition.</p>
+</div>
+
+<div class="card blue">
+<h3>Step 3 — remedy B: Soft Overlong Punishment (a graduated warning zone)</h3>
+<p>Filtering alone tells the model nothing about length, so it has no reason to avoid the cap. The second remedy adds a penalty that ramps up as you approach the limit, rather than a cliff at it:</p>
+<div class="math">
+<div class="line">L_max   = <span class="val">20,480</span>   <span class="cmt">// hard cap</span></div>
+<div class="line">L_cache = <span class="val">4,096</span>    <span class="cmt">// width of the warning zone</span></div>
+<div class="line">         so the zone starts at 20,480 &minus; 4,096 = <span class="val">16,384</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">R_length(y) = <span class="val">0</span>                              if |y| &le; 16,384</div>
+<div class="line">              ( 16,384 &minus; |y| ) / 4,096         if 16,384 &lt; |y| &le; 20,480</div>
+<div class="line">              <span class="val">&minus;1</span>                             if |y| &gt; 20,480</div>
+</div>
+<p style="margin-top:6px">Check that it is continuous &mdash; the three cases meet, they do not jump:</p>
+<div class="scroll"><table>
+<tr><th>|y|</th><th>which case</th><th>R_length</th></tr>
+<tr><td>16,000</td><td>under the zone</td><td>0</td></tr>
+<tr><td>16,384</td><td>zone start</td><td>(16,384&minus;16,384)/4,096 = <strong>0</strong> &nbsp;&#x2713; matches</td></tr>
+<tr><td>18,432</td><td>mid-zone</td><td>(16,384&minus;18,432)/4,096 = <strong>&minus;0.5</strong></td></tr>
+<tr><td>20,480</td><td>zone end</td><td>(16,384&minus;20,480)/4,096 = <strong>&minus;1.0</strong> &nbsp;&#x2713; matches the cap case</td></tr>
+</table></div>
+<p style="margin-top:6px">The penalty is <em>added</em> to the verifier's reward, so a correct-but-very-long answer still nets positive while learning that sprawl is expensive. Compare a cliff: at 20,479 tokens you get full credit and at 20,481 you get &minus;1, which teaches nothing except that the boundary is terrifying.</p>
+</div>
+
+<button class="nx" onclick="go(4)">Next: Fix 4 &mdash; dynamic sampling &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 4 ============================ -->
+<div class="page" data-t="4. Dynamic Sampling">
+<h2>Fix 4 — Dynamic Sampling: Refuse to Train on Dead Groups</h2>
+
+<div class="card red">
+<h3>Step 1 — the arithmetic, from chapter 7</h3>
+<p>GRPO's advantage is a z-score within the group. Run it on a group where all 16 responses got the answer right:</p>
+<div class="math">
+<div class="line">rewards = [1, 1, 1, ..., 1]        <span class="cmt">// G = 16</span></div>
+<div class="line">mean    = 1.0</div>
+<div class="line">std     = <span class="val">0</span></div>
+<div class="line">Â<sub>i</sub>      = (1 &minus; 1.0) / 0  &rarr;  <span class="val">0</span>   <span class="cmt">// defined as 0 in practice</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Same for an all-wrong group: [0,0,...,0] -> std 0 -> Â = 0.</span></div>
+<div class="line"><span class="cmt">// You generated 16 full responses and learned exactly nothing.</span></div>
+</div>
+</div>
+
+<div class="card green">
+<h3>Step 2 — the rule</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Keep a group only if it contains BOTH a right and a wrong answer:</span></div>
+<div class="line"><span class="hl">0  &lt;  |{ correct responses }|  &lt;  G</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Then oversample: keep generating fresh prompts and discarding</span></div>
+<div class="line"><span class="cmt">// dead groups until the batch is full of LIVE ones.</span></div>
+</div>
+<p style="margin-top:6px">Note this is a constraint on the batch, not a term in the loss &mdash; which is why it does not appear in the objective on tab 0 except as a side condition.</p>
+</div>
+
+<div class="card orange">
+<h3>Step 3 — the price, stated honestly</h3>
+<p>As the model improves, more groups come back all-correct, so filling a batch costs progressively more generation &mdash; reproductions report <strong>3&ndash;9&times;</strong> oversampling later in training. DAPO&#x2019;s bet is that a full batch of live gradients beats a nominal batch that is half zeros, and the ablation backs it: dynamic sampling is the single largest jump in the ladder, <strong>+8 points</strong> (42 &rarr; 50).</p>
+<p style="margin-top:6px">You are trading generation compute (cheap, parallel, no gradients) for optimization signal (scarce). That is usually the right trade on modern clusters.</p>
+</div>
+
+<div class="card purple">
+<h3>Step 4 — this is one answer to a bigger question</h3>
+<p><a href="10_difficulty_curriculum.html" style="color:#4fc3f7">Chapter 10</a> is the full treatment: keeping GRPO fed with problems that are neither too easy nor too hard is a standing discipline, and dynamic sampling is the <em>online</em> version of it &mdash; filter the groups you already generated. The alternatives there filter the <em>prompts</em> ahead of time (difficulty probing, curricula), which is cheaper but goes stale as the model outgrows the filter.</p>
+</div>
+
+<button class="nx" onclick="go(5)">Next: the ablation ladder, and the missing KL &rarr;</button>
+</div>
+
+<!-- ============================ PAGE 5 ============================ -->
+<div class="page" data-t="5. What It's Worth">
+<h2>The Ladder, the Missing KL, and What to Take Away</h2>
+
+<div class="card blue">
+<h3>The ablation: what each fix is actually worth</h3>
+<p>Qwen2.5-32B, AIME 2024 (avg@32), techniques added cumulatively:</p>
+<div class="scroll"><table>
+<tr><th>configuration</th><th>AIME 2024</th><th>gain</th></tr>
+<tr><td>Naive GRPO</td><td>30</td><td>&mdash;</td></tr>
+<tr><td>+ Overlong Filtering</td><td>36</td><td style="color:#4caf50">+6</td></tr>
+<tr><td>+ Clip-Higher</td><td>38</td><td>+2</td></tr>
+<tr><td>+ Soft Overlong Punishment</td><td>41</td><td>+3</td></tr>
+<tr><td>+ Token-Level Loss</td><td>42</td><td>+1</td></tr>
+<tr><td>+ Dynamic Sampling &nbsp;<strong>= DAPO</strong></td><td style="color:#4caf50"><strong>50</strong></td><td style="color:#4caf50"><strong>+8</strong></td></tr>
+</table></div>
+<p style="margin-top:8px">Two things worth noticing, because they generalize past this paper:</p>
+<ul style="margin-left:18px;margin-top:4px">
+<li>The two biggest wins (+6 and +8) are both about <strong>not training on bad signal</strong> &mdash; deleting noisy labels, and refusing zero-gradient groups. Neither adds any modelling cleverness.</li>
+<li>30 &rarr; 50 is a <em>66% relative improvement</em> on the same model and data, purely from mechanics. Anyone reporting a bare "GRPO gets 30" is reporting an implementation, not a ceiling.</li>
+</ul>
+</div>
+
+<div class="card orange">
+<h3>The edit nobody expects: DAPO deletes the KL penalty</h3>
+<p>Chapter 5 spent a whole tab arguing the KL leash was <em>essential</em>. DAPO removes it. Both are right, and the reason they are both right is the most portable idea in this chapter:</p>
+<div class="scroll"><table>
+<tr><th></th><th>Chapter 5 (RLHF)</th><th>DAPO</th></tr>
+<tr><td>Reward comes from</td><td>a learned <strong>reward model</strong></td><td>a <strong>verifier</strong> &mdash; is the answer correct?</td></tr>
+<tr><td>Can the reward be gamed?</td><td>Yes &mdash; it has blind spots, and the policy hunts them (ch. 5 tab 7, trap 4)</td><td>No &mdash; there is nothing to hack. 23&times;47 is 1081 or it isn't.</td></tr>
+<tr><td>Must the policy stay near &pi;_ref?</td><td>Yes &mdash; that is the only thing keeping it inside the region where the RM is trustworthy</td><td>No &mdash; and it actively must NOT, since long-form reasoning requires travelling far from a base model</td></tr>
+<tr><td>KL leash</td><td>essential</td><td>deleted</td></tr>
+</table></div>
+<p style="margin-top:8px"><span class="key">The rule underneath:</span> the KL leash is not a general-purpose safety belt &mdash; it is specifically a defence against <em>reward-model</em> error. Replace the learned reward with a checkable one and the thing it was defending against no longer exists. Delete it and you also stop paying the reference model's memory and forward pass.</p>
+<p class="src">Chapter 13 records the same move elsewhere: Magistral also drops KL for reasoning RL; ProRL keeps it but periodically resets the reference to the current policy &mdash; a ratcheting leash rather than a fixed one.</p>
+</div>
+
+<div class="card green">
+<h3>The four fixes, one line each</h3>
+<div class="scroll"><table>
+<tr><th>Fix</th><th>Mechanism in one sentence</th><th>Worth</th></tr>
+<tr><td>Overlong shaping</td><td>Truncated responses get masked out (filtering) and a graduated penalty replaces the cliff (soft punishment), so length artifacts stop being scored as reasoning errors</td><td>+6, +3</td></tr>
+<tr><td>Clip-Higher</td><td>&epsilon;_high 0.2 &rarr; 0.28 gives rare tokens 40% more room to grow, while the ceiling was never binding on confident ones anyway &mdash; this is what stops entropy collapse</td><td>+2</td></tr>
+<tr><td>Token-level loss</td><td>Flat average over all batch tokens instead of a nested per-response average, so a token in a 100-token answer stops counting 10&times; less than one in a 10-token answer</td><td>+1</td></tr>
+<tr><td>Dynamic sampling</td><td>Discard groups that are all-right or all-wrong (std = 0 &rarr; zero gradient) and oversample until the batch is full of live ones, at 3&ndash;9&times; generation cost</td><td>+8</td></tr>
+</table></div>
+</div>
+
+<div class="card purple">
+<h3>Review questions</h3>
+<div class="scroll"><table>
+<tr><th style="width:40%">Question</th><th>One-line answer</th></tr>
+<tr><td>"Why does DAPO drop the KL term when PPO needs it?"</td><td>KL defends against reward-model error; DAPO's reward is a verifier, so there is no proxy to hack &mdash; and long-CoT reasoning requires drifting far from the base model anyway.</td></tr>
+<tr><td>"Why raise only the upper clip bound?"</td><td>The clip's headroom is multiplicative, so it binds hard on low-probability (exploratory) tokens and not at all on confident ones; loosening the floor would speed up suppression, which worsens entropy collapse.</td></tr>
+<tr><td>"What is entropy collapse and how does it stop training?"</td><td>The policy goes deterministic, so all G rollouts match, so rewards match, so std = 0 and every advantage is 0 &mdash; dead groups by a different route than difficulty.</td></tr>
+<tr><td>"Sample-level vs token-level loss &mdash; what actually changes?"</td><td>Per-token weight: nested averaging gives a token in a 100-token response 1/10 the weight of one in a 10-token response, which under-punishes exactly where degenerate text lives.</td></tr>
+<tr><td>"Dynamic sampling sounds expensive. Justify it."</td><td>3&ndash;9&times; more generation, but generation is cheap and parallel while gradient signal is scarce &mdash; and it is the biggest single win in the ablation (+8).</td></tr>
+<tr><td>"What is the headline result?"</td><td>50 on AIME 2024 with Qwen2.5-32B vs DeepSeek-R1-Zero-Qwen-32B's 47, at half the training steps &mdash; and 30 &rarr; 50 from mechanics alone.</td></tr>
+</table></div>
+</div>
+
+<div class="card">
+<h3>Sources</h3>
+<p style="font-size:.88em">DAPO: ByteDance Seed &amp; Tsinghua AIR, <em>DAPO: An Open-Source LLM Reinforcement Learning System at Scale</em>, <a href="https://arxiv.org/abs/2503.14476" style="color:#4fc3f7">arXiv:2503.14476</a>. The ablation ladder, &epsilon; values, L_max / L_cache, batch configuration and AIME numbers are from that paper. The 3&ndash;9&times; oversampling range is from reproductions, as recorded in <a href="10_difficulty_curriculum.html" style="color:#4fc3f7">chapter 10</a>. The two-token and G=2 worked examples are constructed for this course; every number in them is hand-derivable.</p>
+</div>
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page');const nav=document.getElementById('nav');
+pages.forEach((p,i)=>{const b=document.createElement('button');b.textContent=p.dataset.t;b.onclick=()=>go(i);if(i===0)b.classList.add('on');nav.appendChild(b);});
+function go(n){pages.forEach((p,i)=>p.classList.toggle('on',i===n));nav.querySelectorAll('button').forEach((b,i)=>{b.classList.remove('on');if(i<n)b.classList.add('done');else b.classList.remove('done');if(i===n)b.classList.add('on');});window.scrollTo({top:0,behavior:'smooth'});}
+</script>
+</body>
+</html>

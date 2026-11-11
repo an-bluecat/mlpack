@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 4: KL Divergence</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px 20px 80px;line-height:1.7}
+h1{text-align:center;color:#fff;margin-bottom:4px;font-size:1.5em}
+.sub{text-align:center;color:#888;margin-bottom:24px;font-size:.88em}
+.nav{display:flex;justify-content:center;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.nav button{padding:7px 13px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.78em;transition:.2s}
+.nav button:hover{border-color:#555;color:#ccc}
+.nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+.nav button.done{border-color:#4caf50;color:#4caf50}
+.page{display:none;max-width:860px;margin:0 auto}
+.page.on{display:block}
+.page h2{color:#4fc3f7;margin-bottom:12px;font-size:1.2em}
+.card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+.card.blue{border-color:#4fc3f7;background:#0d1b2a}
+.card.green{border-color:#4caf50;background:#0a1a0a}
+.card.orange{border-color:#ff9800;background:#1a1400}
+.card.purple{border-color:#ce93d8;background:#1a0a2a}
+.card.red{border-color:#ef5350;background:#1a0a0a}
+.card h3{color:#ffb74d;margin-bottom:8px;font-size:1em}
+button.nx{padding:10px 24px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+button.nx:hover{background:#66bb6a}
+table{width:100%;border-collapse:collapse;margin:10px 0}
+th,td{padding:8px 12px;border:1px solid #333;text-align:center;font-size:.88em}
+th{background:#1a1a3a;color:#4fc3f7}
+.math{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;margin:10px 0;font-family:'Fira Code',monospace;font-size:.85em;line-height:1.8}
+.math .line{margin:2px 0}
+.math .hl{background:#264f78;padding:2px 6px;border-radius:4px;display:inline-block}
+.math .cmt{color:#6a9955}
+.math .val{color:#b5cea8}
+.math .lbl{color:#9cdcfe}
+.scroll{overflow-x:auto}
+details.more{background:#12122a;border:1px solid #2a2a4a;border-radius:10px;padding:10px 14px;margin:10px 0}
+details.more summary{cursor:pointer;color:#4fc3f7;font-size:.92em;font-weight:600}
+details.more[open] summary{margin-bottom:8px}
+.key{color:#ffb74d;font-weight:600}
+.vs{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:10px 0}
+@media(max-width:650px){.vs{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+<h1>Chapter 4: KL Divergence</h1>
+<p class="sub">The pure waste from using the wrong code — derived step by step</p>
+<div class="nav" id="nav"></div>
+
+<!-- PAGE 0 -->
+<div class="page on" data-t="0. The Waste">
+<h2>Cross-Entropy = Entropy + Waste</h2>
+
+<div class="card blue">
+<h3>From Chapter 3 we calculated:</h3>
+<div class="math">
+<div class="line"><span class="lbl">Alice using her own code</span> (entropy):&nbsp;&nbsp;&nbsp; H(p) = <span class="val">1.75 bits</span></div>
+<div class="line"><span class="lbl">Alice using Bob's code</span> (cross-entropy): H(p,q) = <span class="val">2.25 bits</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// The difference:</span></div>
+<div class="line"><span class="hl">waste = 2.25 &minus; 1.75 = <span class="val">0.5 bits</span></span></div>
+</div>
+<p>That 0.5 bits is <strong>KL divergence</strong>. It's the extra cost you pay — purely because the code doesn't match reality.</p>
+</div>
+
+<div class="card green">
+<h3>Definition</h3>
+<div class="math">
+<div class="line"><span class="hl">KL(p &#x2016; q) = H(p, q) &minus; H(p)</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Cross-entropy minus entropy</span></div>
+<div class="line"><span class="cmt">// Total cost minus minimum cost</span></div>
+<div class="line"><span class="cmt">// = pure waste from mismatch</span></div>
+</div>
+</div>
+<button class="nx" onclick="go(1)">Next: Derive the Σ log(p/q) form &#x2192;</button>
+</div>
+
+<!-- PAGE 1 -->
+<div class="page" data-t="1. Derivation">
+<h2>Deriving the Standard KL Formula — Slowly</h2>
+
+<div class="card blue">
+<h3>Start from what we know</h3>
+<div class="math">
+<div class="line">KL(p &#x2016; q) = H(p, q) &minus; H(p)</div>
+</div>
+<p>Let's expand each side and simplify, one step at a time.</p>
+</div>
+
+<div class="card">
+<h3>Step 1: Write out both formulas</h3>
+<div class="math">
+<div class="line">H(p, q) = &Sigma; p(x) &middot; log(1/q(x))</div>
+<div class="line">H(p)&nbsp;&nbsp;&nbsp; = &Sigma; p(x) &middot; log(1/p(x))</div>
+</div>
+</div>
+
+<div class="card">
+<h3>Step 2: Subtract</h3>
+<div class="math">
+<div class="line">KL(p &#x2016; q) = &Sigma; p(x) &middot; log(1/q(x)) &minus; &Sigma; p(x) &middot; log(1/p(x))</div>
+</div>
+</div>
+
+<div class="card">
+<h3>Step 3: Factor out p(x) (both sums have same weights)</h3>
+<div class="math">
+<div class="line">KL(p &#x2016; q) = &Sigma; p(x) &middot; [ log(1/q(x)) &minus; log(1/p(x)) ]</div>
+</div>
+</div>
+
+<div class="card">
+<h3>Step 4: Use log rule: log(a) − log(b) = log(a/b)</h3>
+<div class="math">
+<div class="line">KL(p &#x2016; q) = &Sigma; p(x) &middot; log( (1/q(x)) / (1/p(x)) )</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Simplify the fraction inside the log:</span></div>
+<div class="line"><span class="cmt">// (1/q) / (1/p) = (1/q) × (p/1) = p/q</span></div>
+</div>
+</div>
+
+<div class="card green">
+<h3>Step 5: Final form</h3>
+<div class="math">
+<div class="line"><span class="hl">KL(p &#x2016; q) = &Sigma; p(x) &middot; log( p(x) / q(x) )</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// "For each event: how much more surprised is q compared to p?"</span></div>
+<div class="line"><span class="cmt">// Weighted by how often the event actually happens (p).</span></div>
+</div>
+</div>
+<button class="nx" onclick="go(2)">Next: Verify with Alice and Bob &#x2192;</button>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page" data-t="2. With Numbers">
+<h2>Verify: Alice and Bob, Every Number</h2>
+
+<div class="card blue">
+<h3>What KL actually measures: the extra area</h3>
+<p style="font-size:.88em;margin-bottom:10px">Each rectangle = <strong>how often Alice says it</strong> (width) &times; <strong>how long the codeword is</strong> (height). Total area = average bits per message. The <span style="color:#ef5350">red extra area</span> is KL — the waste from using the wrong code.</p>
+
+<!-- Rectangle diagram -->
+<div style="display:flex;gap:50px;justify-content:center;flex-wrap:wrap;margin:10px 0">
+  <!-- Alice's code -->
+  <div>
+    <div style="font-size:.82em;color:#4caf50;font-weight:700;text-align:center;margin-bottom:6px">Alice's own code: H(p) = 1.75 bits</div>
+    <div style="display:flex;align-items:flex-end;gap:2px;height:150px">
+      <!-- dog: p=1/8, L=3 bits (Alice's optimal for dog: log(1/(1/8))=3) -->
+      <div style="width:40px;height:135px;background:#c8b4e844;border:2px solid #c8b4e8;border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:3px">
+        <span style="font-size:.55em;color:#c8b4e8">3 bits</span>
+      </div>
+      <!-- cat: p=1/2, L=1 bit -->
+      <div style="width:160px;height:45px;background:#a8c8e844;border:2px solid #a8c8e8;border-radius:3px;display:flex;align-items:center;justify-content:center">
+        <span style="font-size:.65em;color:#a8c8e8">1 bit</span>
+      </div>
+      <!-- fish: p=1/4, L=2 bits -->
+      <div style="width:80px;height:90px;background:#e8d88844;border:2px solid #e8d888;border-radius:3px;display:flex;align-items:center;justify-content:center">
+        <span style="font-size:.6em;color:#e8d888">2 bits</span>
+      </div>
+      <!-- bird: p=1/8, L=3 bits -->
+      <div style="width:40px;height:135px;background:#a8e8a844;border:2px solid #a8e8a8;border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:3px">
+        <span style="font-size:.55em;color:#a8e8a8">3 bits</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:2px;margin-top:2px">
+      <div style="width:40px;text-align:center;font-size:.6em;color:#888">dog 1/8</div>
+      <div style="width:160px;text-align:center;font-size:.6em;color:#888">cat 1/2</div>
+      <div style="width:80px;text-align:center;font-size:.6em;color:#888">fish 1/4</div>
+      <div style="width:40px;text-align:center;font-size:.6em;color:#888">bird 1/8</div>
+    </div>
+    <div style="text-align:center;font-size:.75em;color:#888;margin-top:4px">width = how often Alice says it &nbsp;&nbsp; height = code length</div>
+  </div>
+</div>
+
+<div style="display:flex;gap:50px;justify-content:center;flex-wrap:wrap;margin:16px 0">
+  <!-- Bob's code applied to Alice's frequencies -->
+  <div>
+    <div style="font-size:.82em;color:#ff9800;font-weight:700;text-align:center;margin-bottom:6px">Bob's code on Alice's data: H(p,q) = 2.25 bits</div>
+    <div style="display:flex;align-items:flex-end;gap:2px;height:150px">
+      <!-- dog: p=1/8, Bob's L=1 bit (Bob thinks dog is common → short code) -->
+      <div style="width:40px;height:45px;background:#c8b4e844;border:2px solid #c8b4e8;border-radius:3px;display:flex;align-items:center;justify-content:center">
+        <span style="font-size:.55em;color:#c8b4e8">1 bit</span>
+      </div>
+      <!-- cat: p=1/2, Bob's L=2 bits (Bob thinks cat is uncommon → long code!) -->
+      <div style="width:160px;position:relative;height:90px;border-radius:3px;display:flex;align-items:flex-end">
+        <div style="width:100%;height:45px;background:#a8c8e844;border:2px solid #a8c8e8;border-radius:3px;position:absolute;bottom:0"></div>
+        <div style="width:100%;height:90px;border:2px solid #ef5350;border-radius:3px;position:absolute;bottom:0;display:flex;align-items:center;justify-content:center">
+          <span style="font-size:.65em;color:#a8c8e8">2 bits</span>
+        </div>
+        <div style="width:100%;height:45px;background:#ef535033;border-radius:0 0 3px 3px;position:absolute;top:0;display:flex;align-items:center;justify-content:center">
+          <span style="font-size:.6em;color:#ef5350;font-weight:700">+1 extra bit!</span>
+        </div>
+      </div>
+      <!-- fish: p=1/4, Bob's L=3 bits -->
+      <div style="width:80px;position:relative;height:135px;border-radius:3px">
+        <div style="width:100%;height:90px;background:#e8d88844;border:2px solid #e8d888;border-radius:3px;position:absolute;bottom:0"></div>
+        <div style="width:100%;height:135px;border:2px solid #ef5350;border-radius:3px;position:absolute;bottom:0;display:flex;align-items:center;justify-content:center">
+          <span style="font-size:.6em;color:#e8d888">3 bits</span>
+        </div>
+        <div style="width:100%;height:45px;background:#ef535033;border-radius:3px 3px 0 0;position:absolute;top:0;display:flex;align-items:center;justify-content:center">
+          <span style="font-size:.55em;color:#ef5350;font-weight:700">+1 extra</span>
+        </div>
+      </div>
+      <!-- bird: p=1/8, Bob's L=3 bits (same!) -->
+      <div style="width:40px;height:135px;background:#a8e8a844;border:2px solid #a8e8a8;border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:3px">
+        <span style="font-size:.55em;color:#a8e8a8">3 bits</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:2px;margin-top:2px">
+      <div style="width:40px;text-align:center;font-size:.6em;color:#888">dog 1/8</div>
+      <div style="width:160px;text-align:center;font-size:.6em;color:#888">cat 1/2</div>
+      <div style="width:80px;text-align:center;font-size:.6em;color:#888">fish 1/4</div>
+      <div style="width:40px;text-align:center;font-size:.6em;color:#888">bird 1/8</div>
+    </div>
+  </div>
+</div>
+
+<div style="text-align:center;margin:10px 0;font-size:.92em">
+  <span style="color:#ef5350;font-weight:700">Red extra area</span> = KL divergence = <strong>0.50 bits</strong><br>
+  <span style="font-size:.82em;color:#aaa">Cat is the biggest rectangle (Alice says it the most) AND it got the biggest penalty (2 bits instead of 1). Width &times; extra height = the most waste.</span>
+</div>
+</div>
+
+<div class="card">
+<h3>The numbers behind the bars</h3>
+<table>
+<tr><th>Animal (x)</th><th>p(x) Alice</th><th>q(x) Bob</th><th>p/q</th><th>log&#x2082;(p/q)</th><th>p(x) &middot; log&#x2082;(p/q)</th></tr>
+<tr><td>dog</td><td>1/8</td><td>1/2</td><td>1/4</td><td>&minus;2.0</td><td style="color:#ef5350">&minus;0.25</td></tr>
+<tr><td>cat</td><td>1/2</td><td>1/4</td><td>2</td><td>+1.0</td><td style="color:#4caf50;font-weight:700">+0.50</td></tr>
+<tr><td>fish</td><td>1/4</td><td>1/8</td><td>2</td><td>+1.0</td><td style="color:#4caf50">+0.25</td></tr>
+<tr><td>bird</td><td>1/8</td><td>1/8</td><td>1</td><td>0</td><td>0</td></tr>
+<tr><th colspan="5">Sum</th><th style="color:#4caf50;font-weight:700">+0.50 bits</th></tr>
+</table>
+</div>
+
+<div class="card green">
+<h3>Cross-check</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Method 1: Σ p(x) · log(p(x)/q(x))</span></div>
+<div class="line">KL = &minus;0.25 + 0.50 + 0.25 + 0 = <span class="val">0.50 bits</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Method 2: H(p,q) − H(p)</span></div>
+<div class="line">KL = 2.25 &minus; 1.75 = <span class="val">0.50 bits</span> &#x2714;</div>
+</div>
+</div>
+<button class="nx" onclick="go(3)">Next: KL is asymmetric — and why that matters in ML &#x2192;</button>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page" data-t="3. Asymmetry in ML">
+<h2>Why the Direction Matters — With Numbers</h2>
+
+<div class="card blue">
+<h3>First, say both directions in BITS — the way chapters 1&ndash;3 taught you</h3>
+<p>Chapter 3 gave the decomposition <code>cross-entropy = entropy + waste</code>, and this chapter called the waste <code>KL</code>. Write that out for each direction and the asymmetry stops being mysterious:</p>
+<div class="math">
+<div class="line"><span class="cmt">// FORWARD KL — reality is the TEACHER, the code is the STUDENT's</span></div>
+<div class="line">KL(teacher &#8214; student) = H(teacher, student) &minus; H(teacher)</div>
+<div class="line">                       &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#8593;                    &#8593;</div>
+<div class="line">      <span class="cmt">bits to send TEACHER's words     the unavoidable bits</span></div>
+<div class="line">      <span class="cmt">using the STUDENT's code         (teacher's own entropy)</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// REVERSE KL — reality is the STUDENT, the code is the TEACHER's</span></div>
+<div class="line">KL(student &#8214; teacher) = H(student, teacher) &minus; H(student)</div>
+<div class="line">                       &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#8593;                    &#8593;</div>
+<div class="line">      <span class="cmt">bits to send the STUDENT's words  the unavoidable bits</span></div>
+<div class="line">      <span class="cmt">using the TEACHER's code         (student's own entropy)</span></div>
+</div>
+<p style="margin-top:8px"><span class="key">The single rule that generates everything else:</span> whoever sits on the <em>left</em> of the &#8214; is <strong>whose words you are sending</strong> &mdash; whose distribution you average over. The one on the right only supplies the codebook.</p>
+<div class="scroll"><table>
+<tr><th>direction</th><th>whose words (sampled from)</th><th>whose codebook</th><th>reads as</th></tr>
+<tr><td>KL(teacher &#8214; student)</td><td>teacher</td><td>student</td><td>"how many extra bits does the student waste describing what the <em>teacher</em> says?"</td></tr>
+<tr><td>KL(student &#8214; teacher)</td><td>student</td><td>teacher</td><td>"how many extra bits does the teacher waste describing what the <em>student</em> says?" &mdash; i.e. how surprised is the teacher by the student's output</td></tr>
+</table></div>
+<p style="margin-top:10px"><strong>How papers actually write this.</strong> The <code>&Sigma; p(x)&middot;log(&hellip;)</code> form used on the rest of this tab is the same thing as the <code>E[&hellip;]</code> form you will meet in every paper &mdash; <code>E</code> is just shorthand for "probability-weighted average":</p>
+<div class="math">
+<div class="line"><span class="cmt">// what this course writes:</span></div>
+<div class="line">KL(&pi;_&theta; &#8214; &pi;_teacher) = &Sigma;<sub>x</sub>  &pi;_&theta;(x) &middot; [ log &pi;_&theta;(x) &minus; log &pi;_teacher(x) ]</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// what a paper writes — identical:</span></div>
+<div class="line">KL(&pi;_&theta; &#8214; &pi;_teacher) = <span class="hl">E<sub>x&sim;&pi;_&theta;</sub></span> [ log &pi;_&theta;(x<sub>t+1</sub>|x<sub>1..t</sub>) &minus; log &pi;_teacher(x<sub>t+1</sub>|x<sub>1..t</sub>) ]</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// The subscript x~&pi;_&theta; IS the weight &pi;_&theta;(x) moved into the E.</span></div>
+<div class="line"><span class="cmt">// It is the entire reason this one is REVERSE and not forward.</span></div>
+</div>
+
+<details class="more"><summary>Refresher: reading the notation papers use &mdash; &pi;, &theta;, |, &sim;, E</summary>
+<div class="scroll"><table>
+<tr><th>symbol</th><th>read it as</th></tr>
+<tr><td><code>&pi;</code></td><td>a <em>policy</em> &mdash; any model that outputs probabilities</td></tr>
+<tr><td><code>&pi;_&theta;</code></td><td>the model whose weights (&theta; = "theta") we are training &mdash; here, the student</td></tr>
+<tr><td><code>x<sub>1..t</sub></code></td><td>tokens 1 through t &mdash; i.e. the prefix so far</td></tr>
+<tr><td><code>x<sub>t+1</sub></code></td><td>the next token</td></tr>
+<tr><td><code>&pi;(x<sub>t+1</sub> | x<sub>1..t</sub>)</code></td><td>probability of that next token <em>given</em> the prefix. The <code>|</code> is "given".</td></tr>
+<tr><td><code>&sim;</code></td><td>"sampled from" / "drawn from"</td></tr>
+<tr><td><code>E[&hellip;]</code></td><td>expected value = probability-weighted average</td></tr>
+</table></div>
+<p style="margin-top:8px"><strong>You have already computed an expectation.</strong> Chapter 1's average code length was one:</p>
+<div class="math">
+<div class="line">E[code length] = (1/2)(1) + (1/4)(2) + (1/8)(3) + (1/8)(3) = <span class="val">1.75</span> bits</div>
+<div class="line">                  &#8593;weight &#8593;value</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// E is only shorthand for: multiply each value by how often it</span></div>
+<div class="line"><span class="cmt">// happens, then add. Nothing more.</span></div>
+</div>
+<p style="margin-top:8px"><strong>And the bracket contents, in bits.</strong> Using <code>&minus;log p =</code> code length from chapter 1:</p>
+<div class="math">
+<div class="line">log &pi;_&theta;(next) &minus; log &pi;_teacher(next)</div>
+<div class="line">  = ( &minus;log &pi;_teacher ) &minus; ( &minus;log &pi;_&theta; )</div>
+<div class="line">      <span class="cmt">&#8593; bits the TEACHER's</span>      <span class="cmt">&#8593; bits the STUDENT's</span></div>
+<div class="line">      <span class="cmt">  code spends here</span>          <span class="cmt">  code spends here</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// = the EXTRA bits the teacher spends on this token.</span></div>
+<div class="line"><span class="cmt">// Positive → the teacher is more surprised than the student is.</span></div>
+</div>
+<p style="margin-top:8px">And the asymmetry is visible in a <em>single</em> token:</p>
+<div class="scroll"><table>
+<tr><th>case</th><th>student</th><th>teacher</th><th>bracket value</th><th>weight</th><th>contribution</th></tr>
+<tr><td>student <strong>invents</strong></td><td>0.9</td><td>0.1</td><td>&minus;0.15 &minus; (&minus;3.32) = <strong>+3.17</strong></td><td>0.9 (big)</td><td style="color:#ef5350"><strong>2.85</strong> &mdash; punished hard</td></tr>
+<tr><td>student <strong>omits</strong></td><td>0.1</td><td>0.9</td><td>&minus;3.32 &minus; (&minus;0.15) = <strong>&minus;3.17</strong></td><td>0.1 (tiny)</td><td>&minus;0.32 &mdash; barely noticed</td></tr>
+</table></div>
+<p style="margin-top:6px">Individual terms can be negative, as in the second row. The weighted <em>total</em> is always &ge; 0 &mdash; that is the KL &ge; 0 result from tab 1.</p>
+</details>
+
+<p style="margin-top:8px">Read that second row once more, because it is the one that feels backwards: reverse KL never looks at text the student would not produce. It asks only <em>"of the things you actually say, how much would the teacher object?"</em></p>
+
+<details class="more"><summary>The convention that creates the asymmetry: what happens at a zero</summary>
+<p style="margin-top:8px">Both sums use the convention <code>0 &middot; log(0/x) = 0</code> &mdash; a term with zero <em>weight</em> vanishes, even if its log is infinite. That one rule decides which mistakes are forgiven:</p>
+<div class="math">
+<div class="line"><span class="cmt">// FORWARD, weighted by teacher:</span></div>
+<div class="line">   teacher &gt; 0, student = 0  &rarr;  log(p/0) = &infin;   <span class="cmt">// CANNOT miss anything</span></div>
+<div class="line">   teacher = 0, student &gt; 0  &rarr;  weight 0, term 0  <span class="cmt">// may INVENT freely</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// REVERSE, weighted by student:</span></div>
+<div class="line">   student &gt; 0, teacher = 0  &rarr;  log(q/0) = &infin;   <span class="cmt">// CANNOT invent</span></div>
+<div class="line">   student = 0, teacher &gt; 0  &rarr;  weight 0, term 0  <span class="cmt">// may MISS freely</span></div>
+</div>
+<p style="margin-top:6px">So: <strong>forward forbids omission and permits invention; reverse forbids invention and permits omission.</strong> Everything on the rest of this tab is that table with numbers attached.</p>
+</details>
+</div>
+
+<div class="card blue">
+<h3>First: connect to what you already know</h3>
+<p>Your understanding is correct: cross-entropy = p(reality) weighted by q(model). Training minimizes it. That's <strong>forward KL with one-hot p</strong>, which collapses to −log(q(correct class)).</p>
+<p style="margin-top:6px">The question is: why does flipping the direction change the behavior so dramatically? The answer is in <strong>which distribution provides the weights</strong>.</p>
+</div>
+
+<div class="card">
+<h3>The weight is the key</h3>
+<div class="math">
+<div class="line"><span class="cmt">// Forward KL:  Σ <span style="color:#4caf50">p(x)</span> · log(p(x)/q(x))  ← p is the weight</span></div>
+<div class="line"><span class="cmt">// Reverse KL:  Σ <span style="color:#ce93d8">q(x)</span> · log(q(x)/p(x))  ← q is the weight</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// A term only contributes to the sum when its WEIGHT is large.</span></div>
+<div class="line"><span class="cmt">// Forward KL only "cares about" spots where p is big.</span></div>
+<div class="line"><span class="cmt">// Reverse KL only "cares about" spots where q is big.</span></div>
+</div>
+</div>
+
+<div class="card orange">
+<h3>Same two distributions, same student — but different penalties</h3>
+<p>Teacher p = {mat: <strong>0.70</strong>, floor: <strong>0.30</strong>}. Bad student q = {mat: <strong>0.99</strong>, floor: <strong>0.01</strong>}. Student is ignoring "floor."</p>
+
+<!-- Bar visual -->
+<div style="display:flex;gap:24px;justify-content:center;align-items:flex-end;margin:14px 0;flex-wrap:wrap">
+  <div style="text-align:center">
+    <div style="font-size:.8em;color:#4caf50;font-weight:700;margin-bottom:4px">Teacher p</div>
+    <div style="display:flex;align-items:flex-end;gap:6px">
+      <div style="display:flex;flex-direction:column;align-items:center">
+        <span style="font-size:.65em;color:#aaa;margin-bottom:2px">0.70</span>
+        <div style="width:44px;height:112px;background:#4caf5066;border:2px solid #4caf50;border-radius:4px 4px 0 0"></div>
+        <div style="font-size:.65em;color:#888;margin-top:2px">mat</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center">
+        <span style="font-size:.65em;color:#aaa;margin-bottom:2px">0.30</span>
+        <div style="width:44px;height:48px;background:#4caf5066;border:2px solid #4caf50;border-radius:4px 4px 0 0"></div>
+        <div style="font-size:.65em;color:#888;margin-top:2px">floor</div>
+      </div>
+    </div>
+  </div>
+  <div style="align-self:center;color:#666;font-size:1.2em">vs</div>
+  <div style="text-align:center">
+    <div style="font-size:.8em;color:#ce93d8;font-weight:700;margin-bottom:4px">Student q</div>
+    <div style="display:flex;align-items:flex-end;gap:6px">
+      <div style="display:flex;flex-direction:column;align-items:center">
+        <span style="font-size:.65em;color:#aaa;margin-bottom:2px">0.99</span>
+        <div style="width:44px;height:158px;background:#ce93d844;border:2px solid #ce93d8;border-radius:4px 4px 0 0"></div>
+        <div style="font-size:.65em;color:#888;margin-top:2px">mat</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center">
+        <span style="font-size:.65em;color:#ff9800;margin-bottom:2px">0.01</span>
+        <div style="width:44px;height:2px;background:#ff980066;border:2px solid #ff9800;border-radius:4px 4px 0 0"></div>
+        <div style="font-size:.65em;color:#ff9800;margin-top:2px;font-weight:700">floor!</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="card red">
+<h3>Forward KL(p‖q): floor term is HUGE because p weights it</h3>
+<div class="math">
+<div class="line"><span class="cmt">// KL(p‖q) = Σ p(x) · log(p(x)/q(x))</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// mat term:   p=0.70 × log(0.70/0.99) = 0.70 × (−0.35) = <span style="color:#4caf50">−0.24</span></span></div>
+<div class="line"><span class="hl"><span class="cmt">// floor term: p=0.30 × log(0.30/0.01) = 0.30 × 3.40  = <span style="color:#ef5350">+1.02</span>  ← HUGE</span></span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Total = −0.24 + 1.02 = 0.78 bits of loss</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// WHY is floor huge?</span></div>
+<div class="line"><span class="cmt">//   p(floor) = 0.30 — teacher cares about floor, so it gets 0.30 weight</span></div>
+<div class="line"><span class="cmt">//   q(floor) = 0.01 — student ignores floor, ratio = 0.30/0.01 = 30, log(30) = 3.4</span></div>
+<div class="line"><span class="cmt">//   0.30 × 3.4 = 1.02 — loss is dominated by this one term</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Forward KL sees through P's eyes.</span></div>
+<div class="line"><span class="cmt">// "You ignored floor. I (the teacher) care about floor. Fix it."</span></div>
+</div>
+</div>
+
+<div class="card green">
+<h3>Reverse KL(q‖p): floor term is tiny because q barely weights it</h3>
+<div class="math">
+<div class="line"><span class="cmt">// KL(q‖p) = Σ q(x) · log(q(x)/p(x))</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// mat term:   q=0.99 × log(0.99/0.70) = 0.99 × 0.35  = <span style="color:#ffb74d">+0.34</span></span></div>
+<div class="line"><span class="hl"><span class="cmt">// floor term: q=0.01 × log(0.01/0.30) = 0.01 × (−3.40) = <span style="color:#4caf50">−0.03</span>  ← tiny</span></span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Total = 0.34 − 0.03 = 0.31 bits of loss</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// WHY is floor tiny?</span></div>
+<div class="line"><span class="cmt">//   q(floor) = 0.01 — student ignores floor, so the weight is only 0.01</span></div>
+<div class="line"><span class="cmt">//   Even though log(0.01/0.30) = −3.4 is large, 0.01 × (−3.4) = −0.03 is tiny</span></div>
+<div class="line"><span class="cmt">//   Reverse KL "sees through q's eyes" — q barely looks at floor, so it barely cares</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// BUT: if q put large mass somewhere p is zero:</span></div>
+<div class="line"><span class="cmt">//   VAE example: encoder puts q(z=3) = 0.90</span></div>
+<div class="line"><span class="cmt">//                prior N(0,1) at z=3: p(z=3) ≈ 0.004</span></div>
+<div class="line"><span class="cmt">//</span></div>
+<div class="line"><span class="cmt">//   term = q(z=3) × log(q/p) = 0.90 × log(0.90/0.004)</span></div>
+<div class="line"><span class="cmt">//        = 0.90 × log(225)</span></div>
+<div class="line"><span class="hl"><span class="cmt">//        = 0.90 × 7.7 = <span style="color:#ef5350">6.9 — crushing penalty</span></span></span></div>
+<div class="line"><span class="cmt">//</span></div>
+<div class="line"><span class="cmt">// Weight = q(z=3) = 0.90 — the encoder IS here, so the penalty hits hard.</span></div>
+<div class="line"><span class="cmt">// "Your encoding cloud is at z=3. N(0,1) barely exists at z=3. Pull back."</span></div>
+<div class="line"><span class="cmt">// → see VAE course Ch2 for the full picture</span></div>
+</div>
+</div>
+<div class="card" style="border-color:#555;font-size:.85em;color:#888;padding:10px 14px">
+  &#x2192; See <a href="../vae_course/2_vae.html" style="color:#4fc3f7">VAE course Ch2, KL Loss tab</a> for this exact example with diagrams showing the encoder being pulled back inside N(0,1).
+</div>
+
+<div class="card blue">
+<h3>So: what behavior does each direction produce?</h3>
+<table>
+<tr><th>Direction</th><th>Weight</th><th>Sees through whose eyes?</th><th>Blows up when</th><th>Result</th></tr>
+<tr>
+  <td><strong>Forward KL(p‖q)</strong></td>
+  <td>p(x)</td>
+  <td>p's eyes — only cares where p is large</td>
+  <td>q is small somewhere p is large</td>
+  <td>q must <strong>cover</strong> everything p covers. q spreads out.</td>
+</tr>
+<tr>
+  <td><strong>Reverse KL(q‖p)</strong></td>
+  <td>q(x)</td>
+  <td>q's eyes — only cares where q is large</td>
+  <td>q is large somewhere p is small (or zero)</td>
+  <td>q must <strong>stay inside</strong> where p exists. q shrinks.</td>
+</tr>
+</table>
+<p style="margin-top:10px"><strong>Distillation uses forward KL(teacher‖student):</strong> teacher p has weight, so the student cannot ignore anything the teacher finds plausible — "floor" must be covered.</p>
+<p style="margin-top:6px"><strong>VAE uses reverse KL(encoder‖prior):</strong> encoder q has weight, so if the encoder sends images to z=15, it gets crushed — q(z=15) is large and p(z=15)≈0 → blows up.</p>
+</div>
+<button class="nx" onclick="go(4)">Next: Distillation worked example &#x2192;</button>
+</div>
+
+<!-- PAGE 4: DISTILLATION WORKED EXAMPLE -->
+<div class="page" data-t="4. Distillation Example">
+<h2>Distillation: Forward vs Reverse KL Side by Side</h2>
+
+<div class="card orange">
+<h3>First: what forward-KL distillation actually DOES, step by step</h3>
+<p>You asked whether it is "walk through the teacher&#x2019;s answer step by step to correct the student&#x2019;s answer." Almost &mdash; with one important correction: <span class="key">there is no student answer.</span> The student never generates anything during forward-KL distillation. The actual loop:</p>
+<div class="math">
+<div class="line"><span class="cmt">// 1. The TEACHER writes the text. The student does not.</span></div>
+<div class="line">prompt = <span class="lbl">"Where did the cat sit?"</span></div>
+<div class="line">teacher's text = <span class="lbl">"The cat sat on the mat ."</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// 2. Walk the teacher's text position by position. At EACH position,</span></div>
+<div class="line"><span class="cmt">//    ask BOTH models for a full distribution over the vocabulary.</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">position 6, prefix = "The cat sat on the ___"</div>
+<div class="line">&nbsp;&nbsp;teacher says: mat .45  floor .40  roof .08  table .04  dog .03</div>
+<div class="line">&nbsp;&nbsp;student says: mat .97  floor .01  roof .01  table .005 dog .005</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// 3. The loss AT THIS POSITION is the forward KL between those two</span></div>
+<div class="line"><span class="cmt">//    distributions — the 1.43 bits computed further down this tab.</span></div>
+<div class="line">loss_6 = KL(teacher &#8214; student) = <span class="val">1.43 bits</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// 4. Average over every position of the teacher's text, then backprop.</span></div>
+<div class="line"><span class="cmt">//    The student is only ever SCORING, never writing.</span></div>
+<div class="line">loss = mean( loss_1, loss_2, ..., loss_T )</div>
+</div>
+<p style="margin-top:8px">So the correction to your mental model: it is not two answers being compared. It is <strong>one text &mdash; the teacher&#x2019;s &mdash; with the student asked at every position "what would you have predicted here?"</strong></p>
+
+<p style="margin-top:10px"><span class="key">And this reveals what "distillation" adds over ordinary fine-tuning.</span> Suppose you kept only the token the teacher actually wrote, as a hard target:</p>
+<div class="math">
+<div class="line"><span class="cmt">// SFT: target is one-hot at "mat" — p = (1, 0, 0, 0, 0)</span></div>
+<div class="line">KL(one-hot &#8214; student) = 1 &times; log(1 / 0.97) = <span class="val">0.044 bits</span></div>
+<div class="line">                       = &minus;log(student(mat))   <span class="cmt">// ...which is just cross-entropy!</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// (a one-hot p has H(p) = 0, so KL = H(p,q) − 0 = H(p,q) exactly)</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Distillation: target is the teacher's SOFT distribution</span></div>
+<div class="line">KL(soft teacher &#8214; student) = <span class="val">1.43 bits</span></div>
+</div>
+<p style="margin-top:6px">Same direction, same formula &mdash; but the one-hot version says only "mat was right," while the soft version also says <em>"and floor was almost as good, and dog was nearly impossible."</em> That extra structure is the whole point of distillation, and it means <strong>ordinary SFT is just forward-KL distillation from an infinitely confident teacher.</strong></p>
+</div>
+
+<div class="card blue">
+<h3>Setup: teacher and two students</h3>
+<p>Teacher fills in "The cat sat on the ___". Five possible words:</p>
+
+<!-- Bar chart: teacher distribution -->
+<div style="margin:14px 0">
+  <div style="font-size:.82em;color:#4caf50;font-weight:700;margin-bottom:8px">Teacher p — knows language well</div>
+  <div style="display:flex;align-items:flex-end;gap:8px;height:120px">
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#aaa;margin-bottom:2px">0.45</span>
+      <div style="width:56px;height:54px;background:#4caf5066;border:2px solid #4caf50;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#888;margin-top:3px">mat</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#aaa;margin-bottom:2px">0.40</span>
+      <div style="width:56px;height:48px;background:#4caf5066;border:2px solid #4caf50;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#888;margin-top:3px">floor</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#aaa;margin-bottom:2px">0.08</span>
+      <div style="width:56px;height:10px;background:#4caf5066;border:2px solid #4caf50;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#888;margin-top:3px">roof</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#aaa;margin-bottom:2px">0.04</span>
+      <div style="width:56px;height:5px;background:#4caf5066;border:2px solid #4caf50;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#888;margin-top:3px">table</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#aaa;margin-bottom:2px">0.03</span>
+      <div style="width:56px;height:4px;background:#4caf5066;border:2px solid #4caf50;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#888;margin-top:3px">dog</span>
+    </div>
+  </div>
+  <p style="font-size:.78em;color:#888;margin-top:4px">Key insight: mat and floor are nearly equal (0.45 vs 0.40). "floor" is a valid answer. "dog" is grammatically wrong.</p>
+</div>
+
+<!-- Bad student -->
+<div style="margin:14px 0">
+  <div style="font-size:.82em;color:#ef5350;font-weight:700;margin-bottom:8px">Bad student q — only learned "mat", forgot everything else</div>
+  <div style="display:flex;align-items:flex-end;gap:8px;height:120px">
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#aaa;margin-bottom:2px">0.97</span>
+      <div style="width:56px;height:116px;background:#ef535066;border:2px solid #ef5350;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#888;margin-top:3px">mat</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#ff9800;margin-bottom:2px">0.01</span>
+      <div style="width:56px;height:2px;background:#ff980066;border:2px solid #ff9800;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#ff9800;margin-top:3px;font-weight:700">floor!</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#aaa;margin-bottom:2px">0.01</span>
+      <div style="width:56px;height:2px;background:#ef535066;border:2px solid #444;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#888;margin-top:3px">roof</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#aaa;margin-bottom:2px">0.005</span>
+      <div style="width:56px;height:1px;background:#ef535066;border:2px solid #444;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#888;margin-top:3px">table</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#aaa;margin-bottom:2px">0.005</span>
+      <div style="width:56px;height:1px;background:#ef535066;border:2px solid #444;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#888;margin-top:3px">dog</span>
+    </div>
+  </div>
+  <p style="font-size:.78em;color:#888;margin-top:4px">Student thinks "mat" is the only answer. Barely any probability on "floor" despite it being almost as good.</p>
+</div>
+</div>
+
+<div class="card red">
+<h3>Forward KL(teacher ‖ student) — computed term by term</h3>
+<p style="font-size:.85em;color:#aaa;margin-bottom:8px">KL = Σ <strong style="color:#4caf50">p(x)</strong> · log(p(x)/q(x)) — teacher p provides the weight</p>
+<div class="math">
+<div class="line"><span class="lbl">mat:  </span> <span class="val">0.45</span> &times; log(0.45/0.97) = 0.45 &times; (−0.77) = <span style="color:#4caf50">−0.35</span></div>
+<div class="hl"><div class="line"><span class="lbl">floor:</span> <span class="val">0.40</span> &times; log(0.40/0.01) = 0.40 &times; 3.69 &nbsp;= <span style="color:#ef5350" style="font-weight:700">+1.48</span> &larr; HUGE</div></div>
+<div class="line"><span class="lbl">roof: </span> <span class="val">0.08</span> &times; log(0.08/0.01) = 0.08 &times; 2.08 &nbsp;= <span style="color:#ffb74d">+0.17</span></div>
+<div class="line"><span class="lbl">table:</span> <span class="val">0.04</span> &times; log(0.04/0.005) = 0.04 &times; 2.08 = <span style="color:#ffb74d">+0.08</span></div>
+<div class="line"><span class="lbl">dog:  </span> <span class="val">0.03</span> &times; log(0.03/0.005) = 0.03 &times; 1.79 = <span style="color:#ffb74d">+0.05</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">Total = −0.35 + <strong>1.48</strong> + 0.17 + 0.08 + 0.05 = <span class="val" style="color:#ef5350">1.43</span></div>
+</div>
+<p style="margin-top:8px"><strong>Floor explodes because teacher p(floor)=0.40 is the weight.</strong> The teacher cares deeply about floor. Student ignoring floor = massive penalty. Student <em>must</em> cover floor.</p>
+</div>
+
+<div class="card green">
+<h3>Reverse KL(student ‖ teacher) — same student, same teacher</h3>
+<p style="font-size:.85em;color:#aaa;margin-bottom:8px">KL = Σ <strong style="color:#ce93d8">q(x)</strong> · log(q(x)/p(x)) — student q provides the weight</p>
+<div class="math">
+<div class="line"><span class="lbl">mat:  </span> <span class="val">0.97</span> &times; log(0.97/0.45) = 0.97 &times; 0.77 &nbsp;= <span style="color:#ffb74d">+0.74</span></div>
+<div class="hl"><div class="line"><span class="lbl">floor:</span> <span class="val">0.01</span> &times; log(0.01/0.40) = 0.01 &times; (−3.69) = <span style="color:#4caf50">−0.04</span> &larr; tiny!</div></div>
+<div class="line"><span class="lbl">roof: </span> <span class="val">0.01</span> &times; log(0.01/0.08) = 0.01 &times; (−2.08) = <span style="color:#4caf50">−0.02</span></div>
+<div class="line"><span class="lbl">table:</span> <span class="val">0.005</span> &times; log(0.005/0.04) = nearly 0</div>
+<div class="line"><span class="lbl">dog:  </span> <span class="val">0.005</span> &times; log(0.005/0.03) = nearly 0</div>
+<div class="line">&nbsp;</div>
+<div class="line">Total ≈ 0.74 − 0.04 − 0.02 &asymp; <span class="val" style="color:#4caf50">0.68</span></div>
+</div>
+<p style="margin-top:8px"><strong>Floor is tiny because student q(floor)=0.01 is the weight.</strong> Student barely looks at floor, so the floor term barely exists. Reverse KL doesn't notice the student is wrong about floor. Student gets away with it.</p>
+</div>
+
+<div class="card orange">
+<h3>The same mismatch, completely different penalties</h3>
+<div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin:10px 0">
+  <div style="text-align:center;padding:16px 24px;background:#1a0a0a;border:2px solid #ef5350;border-radius:10px">
+    <div style="font-size:.85em;color:#888">Forward KL(teacher‖student)</div>
+    <div style="font-size:2em;color:#ef5350;font-weight:700;margin:4px 0">1.43</div>
+    <div style="font-size:.78em;color:#aaa">floor term: +1.48<br>student <strong>must fix floor</strong></div>
+  </div>
+  <div style="text-align:center;padding:16px 24px;background:#0a1a0a;border:2px solid #4caf50;border-radius:10px">
+    <div style="font-size:.85em;color:#888">Reverse KL(student‖teacher)</div>
+    <div style="font-size:2em;color:#4caf50;font-weight:700;margin:4px 0">0.68</div>
+    <div style="font-size:.78em;color:#aaa">floor term: −0.04<br>student <strong>gets away with it</strong></div>
+  </div>
+</div>
+<p style="margin-top:8px"><span class="key">Classic distillation (Hinton 2015) uses forward KL.</span> Forces student to cover everything teacher finds plausible. Reverse KL would let the student collapse onto "mat" and barely react.</p>
+</div>
+
+<div class="card purple">
+<h3>But what would reverse KL be good at in this same example?</h3>
+<p>Flip the scenario. New student: spread too thin, gives every word similar probability.</p>
+
+<div style="margin:14px 0">
+  <div style="font-size:.82em;color:#ce93d8;font-weight:700;margin-bottom:8px">Overconfident-in-spread student q2 — doesn't commit to anything</div>
+  <div style="display:flex;align-items:flex-end;gap:8px;height:120px">
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#aaa;margin-bottom:2px">0.25</span>
+      <div style="width:56px;height:30px;background:#ce93d844;border:2px solid #ce93d8;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#888;margin-top:3px">mat</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#aaa;margin-bottom:2px">0.25</span>
+      <div style="width:56px;height:30px;background:#ce93d844;border:2px solid #ce93d8;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#888;margin-top:3px">floor</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#aaa;margin-bottom:2px">0.20</span>
+      <div style="width:56px;height:24px;background:#ce93d844;border:2px solid #ce93d8;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#888;margin-top:3px">roof</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#ff9800;margin-bottom:2px">0.20</span>
+      <div style="width:56px;height:24px;background:#ff980066;border:2px solid #ff9800;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#ff9800;margin-top:3px;font-weight:700">dog!</span>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">
+      <span style="font-size:.7em;color:#aaa;margin-bottom:2px">0.10</span>
+      <div style="width:56px;height:12px;background:#ce93d844;border:2px solid #ce93d8;border-radius:4px 4px 0 0"></div>
+      <span style="font-size:.7em;color:#888;margin-top:3px">table</span>
+    </div>
+  </div>
+  <p style="font-size:.78em;color:#888;margin-top:4px">Puts 0.20 on "dog" — grammatically impossible. Teacher had 0.03. Student hallucinating mass where teacher says it shouldn't exist.</p>
+</div>
+
+<div class="math">
+<div class="line"><span class="cmt">// Reverse KL(student q2 ‖ teacher p), dog term:</span></div>
+<div class="line"><span class="lbl">dog:</span> q=<span class="val">0.20</span> × log(0.20/0.03)</div>
+<div class="line">&nbsp;&nbsp;&nbsp; = 0.20 × log(6.7)</div>
+<div class="line">&nbsp;&nbsp;&nbsp; = 0.20 × 1.9</div>
+<div class="line"><span class="hl">&nbsp;&nbsp;&nbsp; = <span class="val" style="color:#ef5350">+0.38</span> ← large penalty</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Why? q(dog)=0.20 is the weight — student IS putting mass on dog.</span></div>
+<div class="line"><span class="cmt">// p(dog)=0.03 → teacher says dog is nearly impossible here.</span></div>
+<div class="line"><span class="cmt">// Reverse KL fires hard: "you're inventing probability where the teacher says no."</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Forward KL(teacher ‖ student q2) dog term:</span></div>
+<div class="line"><span class="lbl">dog:</span> p=<span class="val">0.03</span> × log(0.03/0.20) = 0.03 × (−1.9) = <span class="val" style="color:#4caf50">−0.06</span> ← tiny</div>
+<div class="line"><span class="cmt">// Forward barely notices — teacher p(dog)=0.03 weight is small.</span></div>
+</div>
+
+<p style="margin-top:10px"><span class="key">Reverse KL is good at preventing hallucination</span> — student putting mass somewhere the teacher says is wrong. Forward KL is good at preventing omission — student missing something the teacher says is right.</p>
+</div>
+
+<div class="card red">
+<h3>The cleanest proof they are different questions: one says &infin; exactly where the other says a finite number</h3>
+<p>Two valid ways to answer, and nothing sensible in between:</p>
+<div class="math">
+<div class="line">prompt: <span class="lbl">"How do I get to the airport?"</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">teacher P = [ <span class="val">0.5</span> , <span class="val">0.0</span> , <span class="val">0.5</span> ]</div>
+<div class="line">              &#8595;      &#8595;      &#8595;</div>
+<div class="line">           "train"  blend  "taxi"    <span class="cmt">// the blend "train taxi" is nonsense</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">student A (hedges)  = [ 1/3, 1/3, 1/3 ]   <span class="cmt">// covers both — plus the nonsense</span></div>
+<div class="line">student B (commits) = [ 1.0, 0.0, 0.0 ]   <span class="cmt">// says "train", ignores "taxi"</span></div>
+</div>
+<div class="scroll"><table>
+<tr><th></th><th>student A (hedges)</th><th>student B (commits)</th><th>preferred?</th></tr>
+<tr><td><strong>forward</strong> KL(teacher &#8214; student)</td><td>0.5&middot;log(0.5/&#8531;)&times;2 = <strong>0.585 bits</strong></td><td>0.5&middot;log(0.5/0) = <strong style="color:#ef5350">&infin;</strong></td><td style="color:#4caf50">A, by an infinite margin</td></tr>
+<tr><td><strong>reverse</strong> KL(student &#8214; teacher)</td><td>&#8531;&middot;log(&#8531;/0) = <strong style="color:#ef5350">&infin;</strong></td><td>1&middot;log(1/0.5) = <strong>1 bit</strong></td><td style="color:#4caf50">B, by an infinite margin</td></tr>
+</table></div>
+<p style="margin-top:8px">Read the two rows. <span class="key">They reach exactly opposite verdicts, and each calls the other&#x2019;s favourite infinitely bad.</span> Not a difference of degree &mdash; they are answering different questions:</p>
+<ul style="margin-left:18px;margin-top:4px">
+<li><strong>Forward</strong> is horrified that B <em>omits</em> "taxi", which the teacher genuinely says. It does not care at all that A puts &#8531; on nonsense &mdash; the teacher&#x2019;s weight there is 0, so that term vanishes.</li>
+<li><strong>Reverse</strong> is horrified that A <em>invents</em> the nonsense blend. It does not care at all that B ignores "taxi" &mdash; the student&#x2019;s weight there is 0, so that term vanishes.</li>
+</ul>
+<p style="margin-top:6px">Then notice which student you would rather ship. A, the forward-KL winner, will actually emit "take the train taxi" a third of the time. B just tells you to take the train.</p>
+</div>
+
+<div class="card green">
+<h3>So reverse KL is what ON-POLICY distillation is &mdash; with the actual formula</h3>
+<p>Two <em>separate</em> choices get conflated here, so pull them apart:</p>
+<div class="scroll"><table>
+<tr><th></th><th>whose text do you train on?</th><th>which direction at each position?</th></tr>
+<tr><td>classic distillation</td><td>the <strong>teacher</strong>&#x2019;s (off-policy)</td><td>forward</td></tr>
+<tr><td>on-policy distillation</td><td>the <strong>student</strong>&#x2019;s own samples</td><td>reverse</td></tr>
+</table></div>
+<p style="margin-top:8px">They pair naturally rather than by coincidence: if you <em>sample from the student</em>, then the average you compute is automatically an average <strong>under the student</strong> &mdash; and "expectation under the student" <em>is</em> the definition of reverse KL. Sampling on-policy hands you the reverse direction for free.</p>
+<div class="math">
+<div class="line"><span class="cmt">// Thinking Machines' on-policy distillation, per token:</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// 1. the STUDENT generates the text (so we sit on its own states)</span></div>
+<div class="line"><span class="cmt">// 2. the teacher scores each token the student actually chose</span></div>
+<div class="line"><span class="cmt">// 3. per-token advantage:</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="hl">advantage_t = &minus;( log &pi;_student(token_t) &minus; log &pi;_teacher(token_t) )</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// Read it in bits: "how many EXTRA bits does the teacher spend</span></div>
+<div class="line"><span class="cmt">//  encoding the token I just chose?" — exactly the reverse-KL term</span></div>
+<div class="line"><span class="cmt">//  from the top of tab 3, estimated at the sampled token.</span></div>
+<div class="line"><span class="cmt">//</span></div>
+<div class="line"><span class="cmt">// Maximizing this advantage = minimizing reverse KL.</span></div>
+</div>
+<p style="margin-top:8px">Two properties the post highlights, both readable straight off the asymmetry table:</p>
+<ul style="margin-left:18px;margin-top:4px">
+<li><strong>Mode-seeking.</strong> Reverse KL forbids invention and permits omission &rarr; the student commits to <em>one</em> teacher-approved behaviour instead of spreading across several suboptimal ones.</li>
+<li><strong>"Unhackable."</strong> Low reverse KL <em>guarantees</em> that the text you actually produce is text the teacher finds likely &mdash; because reverse KL only ever measures text you produce. Low <em>forward</em> KL carries no such guarantee: student A above has excellent forward KL and still emits nonsense a third of the time.</li>
+</ul>
+<p style="margin-top:6px">It also cures compounding error: the student is graded on the states it actually reaches &mdash; including ones it reached by mistake &mdash; so the teacher supplies recovery behaviour exactly where the student needs it. Reported on Qwen3: <strong>17,920 GPU-hours (RL, 67.6% AIME&#x2019;24) &rarr; 1,800 GPU-hours (on-policy distillation, 74.4%)</strong>.</p>
+</div>
+
+<div class="card blue">
+<h3>Who generates, who scores &mdash; and only ONE of them generates</h3>
+<p>Easy thing to get wrong: you do <em>not</em> generate with both models. In each setup exactly one model writes the text and the other only scores it &mdash; and which is which <strong>swaps</strong> between the directions.</p>
+<div class="scroll"><table>
+<tr><th></th><th>who <strong>generates</strong><br><span style="font-weight:400;font-size:.9em">slow, sequential</span></th><th>who <strong>scores</strong><br><span style="font-weight:400;font-size:.9em">one parallel forward pass</span></th></tr>
+<tr><td>forward / classic distillation</td><td><strong>teacher</strong></td><td>student</td></tr>
+<tr><td>reverse / on-policy distillation</td><td style="color:#4caf50"><strong>student</strong></td><td style="color:#4caf50"><strong>teacher</strong></td></tr>
+</table></div>
+<p style="margin-top:6px">Scoring T tokens is a single pass, not T passes &mdash; the causal mask hands you every position at once.</p>
+
+<p style="margin-top:10px">Traced over a whole answer, not one token:</p>
+<div class="math">
+<div class="line"><span class="cmt">// ---- FORWARD: the teacher writes ----</span></div>
+<div class="line">prompt: <span class="lbl">"What is 23 &times; 47?"</span></div>
+<div class="line">TEACHER writes: <span class="lbl">"23&times;40=920, 23&times;7=161, total 1081."</span>   <span class="cmt">// 12 tokens</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">for each of the 12 positions:</div>
+<div class="line">    teacher's full vocab distribution</div>
+<div class="line">    student's full vocab distribution      <span class="cmt">// ONE batched pass</span></div>
+<div class="line">    loss_t = KL(teacher_t &#8214; student_t)      <span class="cmt">// sum over ~50,000 entries</span></div>
+<div class="line">loss = mean(loss_1 ... loss_12)</div>
+<div class="line"><span class="cmt">// the student generated NOTHING.</span></div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// ---- REVERSE: the student writes ----</span></div>
+<div class="line">STUDENT writes: <span class="lbl">"23&times;40=900, 23&times;7=161, total 1061."</span>  <span class="cmt">// its own mistake!</span></div>
+<div class="line">&nbsp;</div>
+<div class="line">for each of its 12 tokens:</div>
+<div class="line">    log &pi;_student(token_t)     <span class="cmt">// already known from generating</span></div>
+<div class="line">    log &pi;_teacher(token_t)     <span class="cmt">// ONE teacher pass over the student's text</span></div>
+<div class="line">    advantage_t = &minus;( log &pi;_student &minus; log &pi;_teacher )</div>
+<div class="line"><span class="cmt">// the teacher generated NOTHING — it only graded.</span></div>
+</div>
+
+<p style="margin-top:8px"><span class="key">Now look at where the student wrote 900.</span> The teacher scores that position and says "given the prefix <code>23&times;40=</code>, I'd give <code>9</code> almost no probability" &mdash; a large penalty landing exactly on the error. And at the <em>next</em> position, with prefix <code>...=900,</code>, the teacher still supplies a distribution &mdash; telling the student how to continue <strong>from inside its own mistake</strong>. Forward KL can never do this, because the string <code>900</code> appears nowhere in the teacher's text.</p>
+
+<p style="margin-top:10px"><strong>The practical consequence, which is the one that decides your infrastructure:</strong></p>
+<div class="math">
+<div class="line">forward &rarr; the teacher's text is generated ONCE, cached, reused forever</div>
+<div class="line">        &rarr; no teacher needed at training time at all</div>
+<div class="line">&nbsp;</div>
+<div class="line">reverse &rarr; the student's text changes every single step</div>
+<div class="line">        &rarr; the teacher must be LIVE in memory, scoring, every step</div>
+</div>
+
+<details class="more"><summary>Pedantic but important: "forward &rArr; teacher generates" is a convention, not a law</summary>
+<p style="margin-top:8px">These are two <em>independent</em> choices:</p>
+<div class="math">
+<div class="line">axis 1: whose text do you train on?   teacher (off-policy) | student (on-policy)</div>
+<div class="line">axis 2: which direction per position?  forward | reverse</div>
+</div>
+<p style="margin-top:6px">They get welded together only when you score <strong>the sampled token alone</strong> (one number per position). Then whoever sampled decides the direction, because the average is automatically taken under the sampler. That is the cheap estimator on-policy distillation uses.</p>
+<p style="margin-top:6px">If instead you compute the <strong>full vocab sum</strong> at each position, you may choose freely. Student-generated text with <em>forward</em> KL at each position is a real published method (GKD). So the pairing follows from the estimator, not from the definition.</p>
+</details>
+</div>
+
+<div class="card orange">
+<h3>Then why does the literature default to FORWARD KL at all?</h3>
+<p>Fair question, given everything above. Five reasons, and the first is decisive:</p>
+
+<p style="margin-top:10px"><strong>1. Forward KL is supervised learning. Reverse KL is reinforcement learning.</strong> That is not a slogan &mdash; it falls out of where &theta; sits:</p>
+<div class="math">
+<div class="line"><span class="cmt">// FORWARD: θ appears only INSIDE the bracket.</span></div>
+<div class="line">KL = E<sub>x&sim;<span class="val">&pi;_teacher</span></sub>[ log &pi;_teacher &minus; log &pi;_&theta; ]</div>
+<div class="line">              <span class="cmt">&#8593; does NOT depend on θ</span></div>
+<div class="line">&rarr; just backprop through log &pi;_&theta;. A drop-in swap for your SFT loss.</div>
+<div class="line">&nbsp;</div>
+<div class="line"><span class="cmt">// REVERSE: θ is ALSO in the thing you sample from.</span></div>
+<div class="line">KL = E<sub>x&sim;<span class="val">&pi;_&theta;</span></sub>[ log &pi;_&theta; &minus; log &pi;_teacher ]</div>
+<div class="line">              <span class="cmt">&#8593; DEPENDS on θ</span></div>
+<div class="line">&rarr; you cannot just differentiate the inside. You need the score-function</div>
+<div class="line">   (REINFORCE) trick to differentiate through the sampling itself.</div>
+</div>
+<p style="margin-top:6px">So reverse KL drags in the entire policy-gradient apparatus: a generation loop inside the training loop, an inference engine, weight syncing. Forward KL is a loss function; reverse KL is a training <em>system</em>. For most of distillation&#x2019;s history nobody wanted to pay that.</p>
+<p style="margin-top:6px;font-size:.9em"><strong>One honest qualification</strong>, since "needs RL" can sound worse than it is. On-policy distillation routes the reverse KL through an RL loss, but with a <strong>discount factor of zero</strong> &mdash; each token optimizes only itself. So it needs the RL <em>plumbing</em> (sampling loop, importance-sampling loss) but none of RL's hard part: no value model, no GAE, no credit assignment over time, because each token's reward is already attached to that token. See <a href="../rl_demos/11_on_policy_distillation.html" style="color:#4fc3f7">RL ch. 11 tab 5</a> for the loop.</p>
+
+<p style="margin-top:10px"><strong>2. Distillation was invented for classifiers, where the problem does not exist.</strong> Hinton's 2015 setting has a fixed set of inputs and no generation &mdash; so no autoregressive prefixes, no compounding error, no exposure bias. Forward KL is simply the right answer there. Every reverse-KL argument on this tab is specific to <em>sequence generation</em>, which only became the dominant use case recently.</p>
+
+<p style="margin-top:10px"><strong>3. Mode-seeking is a genuine cost, not only a benefit.</strong> If the teacher has five valid ways to answer, reverse KL teaches one. You lose diversity &mdash; bad for creative tasks, for sampling variety, and for general-purpose students.</p>
+
+<p style="margin-top:10px"><strong>4. Reverse KL can drop capabilities silently.</strong> Recall "permits omission": if the student never explores some region, the loss never notices it is missing. A whole skill can vanish and the training curve stays clean. Forward KL cannot hide that &mdash; anything the teacher does and the student does not is an infinite penalty.</p>
+
+<p style="margin-top:10px"><strong>5. It needs a student that is already decent.</strong> Reverse KL commits to whichever mode the student currently has. Run it on a weak student and it confidently locks in something mediocre. So the usual pipeline is: get into a sensible region first with SFT or forward KL, <em>then</em> sharpen with reverse KL on-policy.</p>
+
+<div class="scroll"><table>
+<tr><th>want</th><th>use</th></tr>
+<tr><td>broad coverage of everything the teacher knows</td><td>forward</td></tr>
+<tr><td>never emit something the teacher wouldn't</td><td>reverse</td></tr>
+<tr><td>a classifier, or no generation in the loop</td><td>forward</td></tr>
+<tr><td>long autoregressive reasoning that must not derail</td><td>reverse, on-policy</td></tr>
+<tr><td>both (the common production answer)</td><td>forward/SFT first, then reverse to sharpen &mdash; or the mixed &alpha;&middot;forward + (1&minus;&alpha;)&middot;reverse in the table below</td></tr>
+</table></div>
+</div>
+
+<div class="card purple">
+<h3>Your objection, answered: "but the teacher IS the real distribution &mdash; shouldn&#x2019;t we use it?"</h3>
+<p>Right thing to be bothered by. The resolution: the left slot of <code>KL(&middot; &#8214; &middot;)</code> does not mean "who is correct." It means <strong>whose text we are measuring.</strong></p>
+<div class="scroll"><table>
+<tr><th>question you might want answered</th><th>the KL that answers it</th></tr>
+<tr><td>"How well does the student <em>describe the teacher</em>?"</td><td>forward &mdash; averaged over teacher text</td></tr>
+<tr><td>"How much would the teacher <em>object to what the student says</em>?"</td><td>reverse &mdash; averaged over student text</td></tr>
+</table></div>
+<p style="margin-top:8px">At deployment, <strong>the student writes the text.</strong> So the quantity that predicts how good your shipped model is, is the second one. Forward KL spends most of its attention on text the student will never produce.</p>
+<p style="margin-top:8px">There is also a capacity argument underneath, which is why this is not merely philosophical. A smaller student genuinely <em>cannot</em> match the teacher&#x2019;s full distribution. Forced to approximate, the two directions fail in opposite ways:</p>
+<div class="math">
+<div class="line">forward &rarr; hedge across every teacher mode</div>
+<div class="line">        &rarr; mass lands BETWEEN modes, where the teacher has none</div>
+<div class="line">        &rarr; student emits blends the teacher would never write</div>
+<div class="line">&nbsp;</div>
+<div class="line">reverse &rarr; commit to one mode the teacher likes</div>
+<div class="line">        &rarr; less diverse, but everything it says is teacher-approved</div>
+</div>
+<p style="margin-top:6px">So "the teacher is correct" argues <em>for</em> reverse KL, not against it: trusting the teacher means wanting <strong>everything you say</strong> to be something the teacher would say &mdash; and that is reverse KL&#x2019;s question, not forward&#x2019;s.</p>
+</div>
+
+<div class="card" style="border-color:#555;background:#111">
+<h3 style="color:#aaa">State of the art: is reverse KL used for LLM distillation?</h3>
+<p style="font-size:.88em;margin-bottom:8px">Yes — recent papers argue forward KL alone isn't enough for LLMs.</p>
+<table style="font-size:.82em">
+<tr><th>Method</th><th>KL direction</th><th>Motivation</th></tr>
+<tr><td><strong>Classic distillation</strong><br>(Hinton 2015)</td><td>Forward KL(teacher‖student)</td><td>Student covers all teacher knowledge. Standard for classification.</td></tr>
+<tr><td><strong>SeqKD</strong><br>(Kim &amp; Rush 2016)</td><td>Forward KL via sequence-level sampling</td><td>Early LLM distillation. Student learns teacher's likely outputs.</td></tr>
+<tr><td><strong>DistiLLM</strong><br>(Ko et al. 2024)</td><td>Reverse KL(student‖teacher)</td><td>Forward KL causes student to spread over all plausible teacher outputs — too diffuse. Reverse KL makes student commit to one good mode.</td></tr>
+<tr><td><strong>MiniLLM</strong><br>(Gu et al. 2024)</td><td>Reverse KL(student‖teacher)</td><td>Showed that forward KL causes exposure bias in autoregressive generation. Reverse KL generates more fluent, committed responses.</td></tr>
+<tr><td><strong>JKD / mixed KL</strong><br>(2024–25)</td><td>α·forward + (1−α)·reverse</td><td>Best of both: don't omit teacher knowledge AND don't hallucinate.</td></tr>
+</table>
+<p style="font-size:.82em;color:#aaa;margin-top:8px">The intuition for MiniLLM/DistiLLM: in autoregressive generation the student generates token by token from its own outputs. Forward KL spreads the student over all teacher modes — but the student can only ever follow one path, so the spread becomes incoherent. Reverse KL forces the student to commit: "pick one good mode and stay there."</p>
+</div>
+</div>
+
+<div class="page" data-t="5. Summary">
+<h2>Chapter 4 Summary</h2>
+<div class="card blue">
+<table>
+<tr><th>Concept</th><th>Formula</th><th>Meaning</th></tr>
+<tr><td>KL divergence</td><td>KL(p‖q) = H(p,q) − H(p)</td><td>Extra bits from using wrong code</td></tr>
+<tr><td>Equivalent form</td><td>Σ p(x) · log(p(x)/q(x))</td><td>Derived in 5 algebra steps</td></tr>
+<tr><td>Always ≥ 0</td><td>KL = 0 only when p = q</td><td>Right code = zero waste</td></tr>
+<tr><td>Asymmetric</td><td>KL(p‖q) ≠ KL(q‖p)</td><td>Which direction depends on ML use case</td></tr>
+<tr><td>One-hot labels</td><td>KL = cross-entropy (H(p)=0)</td><td>Classification loss = KL divergence</td></tr>
+</table>
+</div>
+
+</div>
+
+<script>
+const pages=document.querySelectorAll('.page');const nav=document.getElementById('nav');
+pages.forEach((p,i)=>{const b=document.createElement('button');b.textContent=p.dataset.t;b.onclick=()=>go(i);if(i===0)b.classList.add('on');nav.appendChild(b);});
+function go(n){pages.forEach((p,i)=>p.classList.toggle('on',i===n));nav.querySelectorAll('button').forEach((b,i)=>{b.classList.remove('on');if(i<n)b.classList.add('done');else b.classList.remove('done');if(i===n)b.classList.add('on');});window.scrollTo({top:0,behavior:'smooth'});}
+</script>
+</body></html>

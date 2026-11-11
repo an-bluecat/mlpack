@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chapter 5: PPO — Don't Overreact</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0a1a;color:#e0e0e0;padding:20px;line-height:1.6}
+  h1{text-align:center;color:#fff;margin-bottom:6px;font-size:1.5em}
+  .sub{text-align:center;color:#888;margin-bottom:24px;font-size:.9em}
+  .nav{display:flex;justify-content:center;gap:5px;margin-bottom:20px;flex-wrap:wrap}
+  .nav button{padding:7px 12px;border:2px solid #333;background:#111;color:#888;border-radius:8px;cursor:pointer;font-size:.8em;transition:.2s}
+  .nav button:hover{border-color:#555;color:#ccc}
+  .nav button.on{border-color:#4fc3f7;color:#4fc3f7;background:#0d2137}
+  .nav button.done{border-color:#4caf50;color:#4caf50}
+  .step{display:none;max-width:920px;margin:0 auto}
+  .step.on{display:block}
+  .step h2{color:#4fc3f7;margin-bottom:10px;font-size:1.25em}
+  .step h3{color:#ffb74d;margin:14px 0 6px;font-size:1em}
+  .card{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:18px;margin-bottom:14px}
+  .card.hi{border-color:#4fc3f7;background:#0d1b2a}
+  .card.warn{border-color:#ff9800;background:#1a1400}
+  .card.ok{border-color:#4caf50;background:#0a1a0a}
+  .card.red{border-color:#ef5350;background:#1a0a0a}
+  details.more{background:#12122a;border:1px solid #2a2a4a;border-radius:12px;padding:12px 18px;margin-bottom:14px}
+  details.more summary{cursor:pointer;color:#4fc3f7;font-weight:600}
+  details.more p,details.more pre{margin-top:10px}
+  pre{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:14px;overflow-x:auto;margin:10px 0;font-size:.88em;line-height:1.5}
+  code{font-family:'Fira Code',Consolas,monospace}
+  .cmt{color:#6a9955}
+.scroll{overflow-x:auto}.kw{color:#c586c0}.num{color:#b5cea8}.str{color:#ce9178}.var{color:#9cdcfe}.fn{color:#dcdcaa}.hl{background:#264f78;display:inline-block;width:100%;padding:0 4px;margin:0 -4px;border-radius:3px}
+  .diagram{display:flex;align-items:center;justify-content:center;gap:10px;margin:14px 0;flex-wrap:wrap}
+  .box{padding:10px 16px;border-radius:10px;text-align:center;font-weight:600;font-size:.9em}
+  .b-bl{background:#1a3a5c;border:2px solid #4fc3f7;color:#4fc3f7}
+  .b-or{background:#3a2a0a;border:2px solid #ffb74d;color:#ffb74d}
+  .b-gr{background:#0a3a0a;border:2px solid #4caf50;color:#4caf50}
+  .b-rd{background:#3a0a0a;border:2px solid #ef5350;color:#ef5350}
+  .b-pu{background:#2a0a3a;border:2px solid #ce93d8;color:#ce93d8}
+  .arr{color:#666;font-size:1.4em}
+  table{width:100%;border-collapse:collapse;margin:10px 0}
+  th,td{padding:7px 10px;border:1px solid #333;text-align:center;font-size:.9em}
+  th{background:#1a1a3a;color:#4fc3f7}
+  .key{color:#ffb74d;font-weight:600}
+  button.nx{padding:10px 22px;background:#4caf50;color:#000;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:.9em;margin-top:14px}
+  button.nx:hover{background:#66bb6a}
+</style>
+</head>
+<body>
+<a href="../index.html" style="position:fixed;top:10px;left:14px;font-size:.75em;color:#555;text-decoration:none;z-index:999;padding:4px 8px;background:#0a0a1a;border:1px solid #333;border-radius:6px;">&larr; index</a>
+
+<h1>Chapter 5: PPO</h1>
+<p class="sub">Proximal Policy Optimization — the algorithm behind ChatGPT's RLHF</p>
+
+<div class="nav" id="nav"></div>
+
+<!-- ===== PAGE 0: THE CRASH ===== -->
+<div class="step on" data-s="0. The Crash">
+  <h2>The Catastrophic Update Problem</h2>
+
+  <div class="card red">
+    <h3>Actor-Critic's weakness</h3>
+    <p>Imagine the agent has been training well for 200 episodes. Then one outlier episode happens:</p>
+<pre><code><span class="cmt"># Episode 201: a wild lucky episode</span>
+<span class="cmt"># The agent stumbles into treasure via a weird path</span>
+<span class="cmt"># Advantage at step 0 happens to be HUGE: +15</span>
+<span class="cmt">#</span>
+<span class="cmt"># Actor loss = -log(0.02) * 15 = MASSIVE gradient</span>
+<span class="cmt">#</span>
+<span class="cmt"># This ONE episode completely rewrites the policy.</span>
+<span class="cmt"># Actions that were previously good now have low probability.</span>
+<span class="cmt"># All the learning from episodes 1-200? Destroyed in one update.</span>
+</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>Why does this happen?</h3>
+    <p>The policy gradient has no speed limit. If the advantage is big, the update is big. Period. There's nothing stopping a single batch from changing the policy from "go right" to "go left" in one step.</p>
+  </div>
+
+  <div class="card ok">
+    <h3>PPO's fix: a speed limit on policy changes</h3>
+    <p style="font-size:1.1em;text-align:center;margin:10px 0;font-weight:600;">"Learn from this experience, but <span style="color:#4fc3f7;">don't change the policy too much in one step</span>."</p>
+  </div>
+  <button class="nx" onclick="go(1)">Next: Reusing data (why we need multiple passes) &#x2192;</button>
+</div>
+
+<!-- ===== PAGE 1: REUSE DATA ===== -->
+<div class="step" data-s="1. Reuse Data">
+  <h2>Why We Reuse Data — and Why We Can't Just Force the Answer</h2>
+
+  <div class="card warn">
+    <h3>Problem: sampling is expensive</h3>
+<pre><code><span class="cmt"># Actor-Critic (Ch.4):</span>
+<span class="cmt"># 1. Run episode → collect data</span>
+<span class="cmt"># 2. Compute loss, one gradient step</span>
+<span class="cmt"># 3. THROW AWAY the data</span>
+<span class="cmt"># 4. Run a new episode</span>
+<span class="cmt">#</span>
+<span class="cmt"># For an LLM: generating one response = a full forward pass.</span>
+<span class="cmt"># Throwing it away after one gradient step is wasteful.</span>
+<span class="cmt"># Can we reuse the same batch for multiple gradient steps?</span>
+</code></pre>
+  </div>
+
+  <div class="card hi">
+    <h3>Idea: update, check, update, check...</h3>
+<pre><code><span class="cmt"># Start: p(action) = 0.40, advantage = +2.0</span>
+<span class="cmt">#</span>
+<span class="cmt"># Step 1: gradient pushes p up → p = 0.46</span>
+<span class="cmt"># Step 2: same data, push again → p = 0.51</span>
+<span class="cmt"># Step 3: same data, push again → p = 0.55</span>
+<span class="cmt"># Step 4: same data, push again → p = 0.60</span>
+<span class="cmt"># ...</span>
+<span class="cmt"># When do we stop?? Without a limit, p rockets to 1.0</span>
+<span class="cmt"># based on one batch of data. Same catastrophe as before.</span>
+</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>Why not just set p = 0.48 directly?</h3>
+    <p>Tempting: "I know I want p to increase 20%. Just set it there."</p>
+    <p style="margin-top:8px">But you don't control probabilities directly. You control <strong>weights</strong> (millions of them), and the probability is the output of a giant nonlinear computation:</p>
+<pre><code><span class="cmt"># weights → matrix multiplies → activations → more layers → logit → softmax → p</span>
+<span class="cmt">#</span>
+<span class="cmt"># Example: loss = 2y, where y = (x-1)²</span>
+<span class="cmt"># At x=5: y=16. Want y=0? Need x to land at 1.</span>
+<span class="cmt"># Pick lr to "fix" y: lr=8 → x = 5 - 8×16 = -123. Overshot wildly.</span>
+<span class="cmt">#</span>
+<span class="cmt"># The lr that perfectly fixes ONE output sends the weights flying,</span>
+<span class="cmt"># which breaks every OTHER output (probabilities at other states).</span>
+<span class="cmt">#</span>
+<span class="cmt"># Neural networks can only be updated bit by bit.</span>
+<span class="cmt"># You push a little, check how far you went, push again.</span>
+<span class="cmt"># The question is: when to STOP pushing.</span>
+</code></pre>
+  </div>
+
+  <div class="card ok">
+    <h3>PPO's answer: stop when the probability has moved 20% from where you sampled</h3>
+    <p>Measure <code>ratio = new_p / old_p</code>. If it exceeds 1.2 (or drops below 0.8), turn off the gradient for that sample. Keep updating the rest.</p>
+  </div>
+  <button class="nx" onclick="go(2)">Next: The clip — the actual code &#x2192;</button>
+</div>
+
+<!-- ===== PAGE 2: THE CLIP ===== -->
+<div class="step" data-s="2. The Clip">
+  <h2>The Clip: Positive and Negative Advantages</h2>
+
+  <div class="card hi">
+    <h3>The rule</h3>
+<pre><code><span class="cmt"># If advantage &gt; 0 (good action): want probability UP</span>
+<span class="cmt">#   → stop when ratio exceeds 1.2 (gone up enough)</span>
+<span class="cmt">#   → but if ratio &lt; 1.0 (went wrong way), keep correcting!</span>
+<span class="cmt">#</span>
+<span class="cmt"># If advantage &lt; 0 (bad action): want probability DOWN</span>
+<span class="cmt">#   → stop when ratio drops below 0.8 (gone down enough)</span>
+<span class="cmt">#   → but if ratio &gt; 1.0 (went wrong way), keep correcting!</span>
+</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>The code — one batch of B samples</h3>
+<pre><code><span class="var">ratio</span> = <span class="var">new_prob</span> / <span class="var">old_prob</span>   <span class="cmt"># shape (B,) — how far each sample moved</span>
+
+<span class="cmt"># Active mask: one-sided clip per sample</span>
+<span class="hl"><span class="var">active</span> = (</span>
+<span class="hl">    ((<span class="var">advantage</span> >= <span class="num">0</span>) &amp; (<span class="var">ratio</span> &lt;= <span class="num">1.2</span>))</span>
+<span class="hl">    | ((<span class="var">advantage</span> &lt; <span class="num">0</span>) &amp; (<span class="var">ratio</span> >= <span class="num">0.8</span>))</span>
+<span class="hl">).<span class="fn">float</span>()</span>
+
+<span class="cmt"># Loss: only active samples contribute gradient</span>
+<span class="var">loss</span> = -(<span class="fn">log</span>(<span class="var">new_prob</span>) * <span class="var">advantage</span> * <span class="var">active</span>).<span class="fn">mean</span>()
+</code></pre>
+    <p style="margin-top:8px">That's it. Samples that have moved too far in the desired direction get masked out (gradient = 0). Samples that haven't moved enough, or moved the wrong way, keep getting full gradient.</p>
+  </div>
+
+  <div class="card ok">
+    <h3>Walkthrough: 4 epochs on one sample</h3>
+<pre><code><span class="cmt"># old_prob = 0.40, advantage = +2.0</span>
+<span class="cmt">#</span>
+<span class="cmt"># Epoch 1: new_prob = 0.40, ratio = 1.00 → active ✓ → push</span>
+<span class="cmt">#          → new_prob becomes 0.46</span>
+<span class="cmt">#</span>
+<span class="cmt"># Epoch 2: new_prob = 0.46, ratio = 1.15 → active ✓ → push</span>
+<span class="cmt">#          → new_prob becomes 0.51</span>
+<span class="cmt">#</span>
+<span class="cmt"># Epoch 3: new_prob = 0.51, ratio = 1.275 → ratio &gt; 1.2 → MASKED</span>
+<span class="cmt">#          → gradient = 0, no change. Done with this sample.</span>
+<span class="cmt">#</span>
+<span class="cmt"># Epoch 4: still masked. Nothing happens.</span>
+</code></pre>
+    <table>
+      <tr><th>Epoch</th><th>new_prob</th><th>ratio</th><th>active?</th><th>result</th></tr>
+      <tr><td>1</td><td>0.40</td><td style="color:#4caf50">1.00</td><td style="color:#4caf50">yes</td><td style="color:#4caf50">push → 0.46</td></tr>
+      <tr><td>2</td><td>0.46</td><td style="color:#4caf50">1.15</td><td style="color:#4caf50">yes</td><td style="color:#4caf50">push → 0.51</td></tr>
+      <tr><td>3</td><td>0.51</td><td style="color:#ef5350">1.275</td><td style="color:#ef5350">no</td><td style="color:#ef5350">stop</td></tr>
+      <tr><td>4</td><td>0.51</td><td style="color:#ef5350">1.275</td><td style="color:#ef5350">no</td><td style="color:#ef5350">stop</td></tr>
+    </table>
+    <p style="margin-top:8px"><span class="key">Different samples saturate at different epochs.</span> In a batch of 200 samples, sample 14 might clip at epoch 1, while sample 87 clips at epoch 3. The mask is per-sample — clipped samples contribute zero gradient while others keep learning.</p>
+  </div>
+
+  <div class="card">
+    <h3>Negative advantage example</h3>
+<pre><code><span class="cmt"># old_prob = 0.50, advantage = -3.0 (bad action)</span>
+<span class="cmt">#</span>
+<span class="cmt"># Epoch 1: ratio = 1.00 → active ✓ → push DOWN → new_prob = 0.43</span>
+<span class="cmt"># Epoch 2: ratio = 0.86 → active ✓ → push DOWN → new_prob = 0.38</span>
+<span class="cmt"># Epoch 3: ratio = 0.76 → ratio &lt; 0.8 → MASKED. Stop punishing.</span>
+</code></pre>
+  </div>
+
+  <details class="more"><summary>Why torch.min(unclipped, clipped) gives the same result</summary>
+<pre><code><span class="cmt"># The standard PPO code you see in papers:</span>
+<span class="var">unclipped</span> = <span class="var">ratio</span> * <span class="var">advantage</span>
+<span class="var">clipped</span> = <span class="fn">torch.clamp</span>(<span class="var">ratio</span>, <span class="num">0.8</span>, <span class="num">1.2</span>) * <span class="var">advantage</span>
+<span class="var">loss</span> = -<span class="fn">torch.min</span>(<span class="var">unclipped</span>, <span class="var">clipped</span>).<span class="fn">mean</span>()
+
+<span class="cmt"># Why is this the same as the active mask?</span>
+<span class="cmt">#</span>
+<span class="cmt"># When adv &gt; 0 and ratio &gt; 1.2:</span>
+<span class="cmt">#   unclipped = ratio * adv (big positive)</span>
+<span class="cmt">#   clipped   = 1.2 * adv   (smaller positive)</span>
+<span class="cmt">#   min picks clipped → a CONSTANT → gradient = 0 ← same as mask!</span>
+<span class="cmt">#</span>
+<span class="cmt"># When adv &lt; 0 and ratio &lt; 0.8:</span>
+<span class="cmt">#   unclipped = ratio * adv (small negative, close to 0)</span>
+<span class="cmt">#   clipped   = 0.8 * adv   (bigger negative)</span>
+<span class="cmt">#   min picks clipped → a CONSTANT → gradient = 0 ← same as mask!</span>
+<span class="cmt">#</span>
+<span class="cmt"># When ratio is in [0.8, 1.2]:</span>
+<span class="cmt">#   clamp does nothing → unclipped = clipped → normal gradient</span>
+<span class="cmt">#</span>
+<span class="cmt"># Same logic, fancier expression. The mask version is clearer.</span>
+</code></pre>
+  </details>
+
+  <button class="nx" onclick="go(3)">Next: The ratio — why it's better than -log(p) &#x2192;</button>
+</div>
+
+<!-- ===== PAGE 3: THE RATIO ===== -->
+<div class="step" data-s="3. The Ratio">
+  <h2>The Ratio: Fixing Stale Data Across Epochs</h2>
+
+  <div class="card warn">
+    <h3>The problem: -log(p) gets weaker each epoch</h3>
+<pre><code><span class="cmt"># Sampled at old_prob = 0.40. After 2 epochs, new_prob = 0.55.</span>
+<span class="cmt">#</span>
+<span class="cmt"># loss = -log(new_prob) * advantage * active</span>
+<span class="cmt">#</span>
+<span class="cmt"># gradient of -log(p): (1 - p)</span>
+<span class="cmt"># At epoch 1: p=0.40, gradient = 0.60 (strong)</span>
+<span class="cmt"># At epoch 2: p=0.46, gradient = 0.54 (weaker)</span>
+<span class="cmt"># At epoch 3: p=0.52, gradient = 0.48 (even weaker)</span>
+<span class="cmt">#</span>
+<span class="cmt"># The signal SHRINKS as p grows. But the data came from p=0.40!</span>
+<span class="cmt"># -log(p) acts like you sampled at 0.55. That's wrong.</span>
+<span class="cmt"># Later epochs waste compute pushing with decreasing strength.</span>
+</code></pre>
+  </div>
+
+  <div class="card hi">
+    <h3>Fix: weight by how much you've drifted from sampling time</h3>
+<pre><code><span class="var">ratio</span> = (<span class="var">new_prob</span> / <span class="var">old_prob</span>).<span class="fn">detach</span>()  <span class="cmt"># frozen scalar, not differentiable</span>
+
+<span class="cmt"># At epoch 1: ratio = 0.40/0.40 = 1.0  → weight × 1.0 (no change)</span>
+<span class="cmt"># At epoch 2: ratio = 0.46/0.40 = 1.15 → weight × 1.15 (push harder)</span>
+<span class="cmt"># At epoch 3: ratio = 0.52/0.40 = 1.30 → weight × 1.30 (even harder)</span>
+<span class="cmt">#</span>
+<span class="cmt"># "The further you've drifted from the sampling distribution,</span>
+<span class="cmt">#  the more you need to correct" — until the clip shuts it off.</span>
+
+<span class="var">loss</span> = -(<span class="fn">log</span>(<span class="var">new_prob</span>) * <span class="var">ratio</span> * <span class="var">advantage</span> * <span class="var">active</span>).<span class="fn">mean</span>()
+<span class="cmt">#                         ^^^^^</span>
+<span class="cmt"># importance weight: corrects for stale data</span>
+</code></pre>
+  </div>
+
+  <div class="card ok">
+    <h3>Simplification: ratio.detach() × -log(p) collapses to just ratio</h3>
+    <p>The gradient (what moves the weights) is the same for both versions:</p>
+    <table>
+      <tr><th>Loss formula</th><th>∂loss / ∂p</th></tr>
+      <tr>
+        <td style="text-align:left"><code>-log(p) × ratio.detach() × adv</code></td>
+        <td style="text-align:left">ratio.detach() × (1/p) × adv = <strong>(p/p_old) × (1/p)</strong> × adv = <strong>adv / p_old</strong></td>
+      </tr>
+      <tr>
+        <td style="text-align:left"><code>-(ratio) × adv</code>&nbsp; (differentiate through ratio)</td>
+        <td style="text-align:left">(1/p_old) × adv = <strong>adv / p_old</strong></td>
+      </tr>
+    </table>
+    <p style="margin-top:10px">Same gradient → same weight update → same training. The p's cancel.</p>
+    <p style="margin-top:6px">So instead of <code>loss = -log(p) * ratio.detach() * adv</code>, just write <code>loss = -(ratio) * adv</code>.</p>
+  </div>
+
+  <div class="card" style="border-color:#ce93d8">
+    <h3 style="color:#ce93d8">Why different loss VALUES are fine</h3>
+    <p>The optimizer <strong>never reads the loss number</strong>. It only reads the gradient:</p>
+<pre><code><span class="var">loss</span>.<span class="fn">backward</span>()      <span class="cmt"># computes ∂loss/∂weights</span>
+<span class="fn">optimizer</span>.<span class="fn">step</span>()     <span class="cmt"># moves weights by: w -= lr × gradient</span>
+</code></pre>
+    <p style="margin-top:8px">The scalar <code>loss = 2.7</code> vs <code>loss = 0.003</code> never enters the weight update. Example:</p>
+    <table>
+      <tr><th>Formula</th><th>loss value (at p=0.46, ratio=1.15, adv=2)</th><th>gradient on logit</th></tr>
+      <tr><td><code>-log(p) × ratio.detach() × adv</code></td><td>−1.15 × 0.78 × 2 = <strong>−1.79</strong></td><td style="color:#4caf50"><strong>1.24</strong></td></tr>
+      <tr><td><code>-(ratio) × adv</code></td><td>−1.15 × 2 = <strong>−2.30</strong></td><td style="color:#4caf50"><strong>1.24</strong></td></tr>
+      <tr><td><code>-(ratio) × adv + 99999</code></td><td><strong>+99996.7</strong></td><td style="color:#4caf50"><strong>1.24</strong></td></tr>
+    </table>
+    <p style="margin-top:8px">Different loss values, <strong>identical gradient</strong>, identical weight update. The loss is just a recipe whose derivative produces the push you want.</p>
+  </div>
+    <details class="more"><summary>What if you forget the <code>.detach()</code>? The gradient reverses on most tokens.</summary>
+    <p style="margin-top:8px">Worth knowing because it is a silent bug, not a crash. Differentiating through <em>both</em> the ratio and the log leaves a spurious factor:</p>
+<pre><code><span class="cmt"># detached (correct) — identical to PPO's r*A:</span>
+grad = -(p/p_old) * (1-p) * adv
+
+<span class="cmt"># NOT detached — an extra (ln p + 1) appears:</span>
+grad = -(p/p_old) * (1-p) * adv * <span class="hl">(ln p + 1)</span>
+</code></pre>
+    <p style="margin-top:6px">Gradient on the logit, with <code>p_old = 0.40</code>, <code>adv = 2</code>:</p>
+    <div class="scroll"><table>
+      <tr><th>p_new</th><th>detached (= PPO)</th><th>not detached</th><th>ln(p)+1</th></tr>
+      <tr><td>0.46</td><td>&minus;1.2420</td><td>&minus;0.2776</td><td>+0.224</td></tr>
+      <tr><td>0.52</td><td>&minus;1.2480</td><td>&minus;0.4319</td><td>+0.346</td></tr>
+      <tr><td style="color:#ef5350">0.30</td><td>&minus;1.0500</td><td style="color:#ef5350"><strong>+0.2142</strong></td><td style="color:#ef5350">&minus;0.204</td></tr>
+    </table></div>
+    <p style="margin-top:6px"><span class="key">Look at the last row: the sign flipped.</span> <code>ln p + 1</code> turns negative below <code>p = 1/e = 0.368</code> &mdash; so for any token the model is less than 37% sure about, the un-detached version pushes it <em>down</em> when the advantage says push up. Most token probabilities live below 0.368, so this is the common case, not an edge case.</p>
+    <p style="margin-top:6px">This is also why the standard implementation is <code>-(ratio * adv)</code> with no log at all: there is nothing left to forget to detach.</p>
+    </details>
+
+
+  <div class="card">
+    <h3>Final code</h3>
+<pre><code><span class="var">ratio</span> = <span class="var">new_prob</span> / <span class="var">old_prob</span>   <span class="cmt"># NOT detached — we differentiate through it</span>
+
+<span class="var">active</span> = (
+    ((<span class="var">advantage</span> >= <span class="num">0</span>) &amp; (<span class="var">ratio</span> &lt;= <span class="num">1.2</span>))
+    | ((<span class="var">advantage</span> &lt; <span class="num">0</span>) &amp; (<span class="var">ratio</span> >= <span class="num">0.8</span>))
+).<span class="fn">float</span>()
+
+<span class="hl"><span class="var">loss</span> = -(<span class="var">ratio</span> * <span class="var">advantage</span> * <span class="var">active</span>).<span class="fn">mean</span>()</span>
+</code></pre>
+    <p style="margin-top:8px">The clip keeps ratio in [0.8, 1.2], so the correction is at most 20%. The clip does 90% of the work; the ratio makes later epochs push at full strength instead of fading.</p>
+  </div>
+
+    <div class="card purple">
+    <h3>The rigorous version: the ratio is not a heuristic, it is an exact identity</h3>
+    <p>Everything above is the intuition &mdash; "you drifted, so push harder" &mdash; and it is worth keeping. But it makes the ratio sound like a tuning trick that happens to work. It is not. It is forced, and here is the derivation.</p>
+
+    <p style="margin-top:10px"><strong>Step 1 &mdash; state what we actually want.</strong> The policy gradient is an average over responses drawn from the <em>current</em> policy:</p>
+<pre><code>want:  E<sub>x ~ π_new</sub>[ ∇log π_new(x) · advantage ]
+              <span class="cmt">↑ the subscript matters — ch. 4 of info theory: whoever sits</span>
+              <span class="cmt">  under the E is whose samples you are averaging over</span>
+
+have:  samples drawn from <span class="hl">π_old</span>, because that is what generated the batch
+</code></pre>
+    <p style="margin-top:6px">So we need an average under one distribution, computed from samples of another. That is a solved problem with an <em>exact</em> answer.</p>
+
+    <p style="margin-top:10px"><strong>Step 2 &mdash; the identity (importance sampling), in three lines.</strong> Multiply and divide by the thing you did sample from:</p>
+<pre><code>E<sub>x~p</sub>[ f(x) ]  =  Σ  p(x) · f(x)
+
+               =  Σ  q(x) · <span class="hl">p(x)/q(x)</span> · f(x)      <span class="cmt"># inserted q/q = 1</span>
+
+               =  E<sub>x~q</sub>[ <span class="hl">p(x)/q(x)</span> · f(x) ]
+
+<span class="cmt"># No approximation anywhere. This is algebra — true for any q</span>
+<span class="cmt"># that is non-zero wherever p is.</span>
+</code></pre>
+    <p style="margin-top:6px">Substituting <code>p = π_new</code>, <code>q = π_old</code>: the factor you must multiply by is <code>π_new/π_old</code>. <span class="key">That is the ratio.</span> It is not chosen &mdash; it is the unique reweighting that makes an average over old samples equal an average over new ones.</p>
+
+    <p style="margin-top:10px"><strong>Step 3 &mdash; so restate what was wrong with <code>-log(p)</code> alone.</strong> The card at the top said the signal "gets weaker," which is the symptom. The real problem is sharper:</p>
+<pre><code><span class="cmt"># Without the ratio you are computing:</span>
+E<sub>x~π_old</sub>[ ∇log π_new(x) · advantage ]
+
+<span class="cmt"># ...which is the gradient of nothing you asked for. It is not a</span>
+<span class="cmt"># weak estimate of the policy gradient — it is a BIASED one, an</span>
+<span class="cmt"># estimate of the wrong quantity. The ratio makes it unbiased.</span>
+</code></pre>
+    <p style="margin-top:6px">"Empirically it works" becomes "it is the only thing that is correct."</p>
+
+    <details class="more"><summary>Sanity check: the weights average to exactly 1</summary>
+<pre><code><span class="cmt"># Under the distribution you actually sampled from:</span>
+E<sub>x~π_old</sub>[ π_new/π_old ]  =  Σ π_old(x) · π_new(x)/π_old(x)
+                          =  Σ π_new(x)
+                          =  <span class="val">1</span>
+</code></pre>
+    <p style="margin-top:6px">So reweighting does not inflate or shrink the total signal &mdash; it only <em>redistributes</em> it, moving weight onto the samples the new policy would have produced more often. A good check that nothing is being smuggled in.</p>
+    </details>
+
+    <p style="margin-top:12px"><span class="key">Now the information-theory reading, which is the cleanest mental model of all.</span> The ratio is an exponentiated log-difference, and you know what log-differences are: bit counts.</p>
+<pre><code>ratio = π_new/π_old = 2^( log₂π_new − log₂π_old )
+
+<span class="cmt"># And from info theory ch. 1, −log₂p is a code length. So:</span>
+log₂π_new − log₂π_old = ( −log₂π_old ) − ( −log₂π_new )
+                      = bits the OLD policy spent on this token
+                        minus bits the NEW policy spends
+                      = <span class="hl">how many bits CHEAPER this token became</span>
+
+<span class="cmt"># So: ratio = 2 ^ (bits saved).  Check it on this page's numbers:</span>
+old = 0.40, new = 0.46:  log₂(0.46)−log₂(0.40) = <span class="val">+0.2016</span> bits → 2^0.2016 = <span class="val">1.15</span> ✓
+old = 0.40, new = 0.52:  log₂(0.52)−log₂(0.40) = <span class="val">+0.3785</span> bits → 2^0.3785 = <span class="val">1.30</span> ✓
+</code></pre>
+    <p style="margin-top:8px">A ratio of 2 means "the new policy describes this token one bit more cheaply." The importance weight is literally <strong>how much the model's opinion of this token has changed, measured in bits.</strong></p>
+
+    <p style="margin-top:12px"><strong>Which turns the clip into a bit budget.</strong> Take log₂ of the clip bounds:</p>
+    <div class="scroll"><table>
+      <tr><th>clip bound on the ratio</th><th>same bound in bits</th><th>reads as</th></tr>
+      <tr><td>1.2 (upper)</td><td>+0.263 bits</td><td>"you may not make this token more than 0.26 bits cheaper in one batch"</td></tr>
+      <tr><td>0.8 (lower)</td><td>&minus;0.322 bits</td><td>"...nor more than 0.32 bits more expensive"</td></tr>
+    </table></div>
+    <p style="margin-top:8px">And notice something the ratio form hides completely. <code>[0.8, 1.2]</code> looks symmetric. <span class="key">In bits it is not:</span> 0.322 vs 0.263 &mdash; the standard clip permits <strong>22% more downward movement than upward</strong>. The "symmetric" clip is quietly biased toward suppressing tokens rather than promoting them.</p>
+    <p style="margin-top:6px">Which is a second, independent argument for <a href="15_dapo.html" style="color:#4fc3f7">chapter 15</a>'s Clip-Higher. DAPO motivates <code>ε_high = 0.28</code> by the headroom available to low-probability tokens; in bits it also simply <em>fixes the asymmetry</em>:</p>
+<pre><code>standard  [0.8, 1.20]  →  bits [ −0.322 , +0.263 ]   <span class="cmt"># 22% biased DOWN</span>
+DAPO      [0.8, 1.28]  →  bits [ −0.322 , +0.356 ]   <span class="cmt"># 11% biased UP</span>
+</code></pre>
+    <p style="margin-top:6px;font-size:.88em">(That bit-symmetry reading is a derivation from this page, not an argument the DAPO paper makes &mdash; but the numbers are exact, and they land in the same place.)</p>
+
+    <p style="margin-top:12px"><strong>Last piece: why bound the ratio at all, given the identity is exact?</strong> Because <em>exact</em> and <em>usable</em> are different things. The identity holds for any amount of drift, but the <em>variance</em> of the estimate does not:</p>
+<pre><code><span class="cmt"># The estimator's variance involves E[ ratio² ]. If π_new and π_old</span>
+<span class="cmt"># drift far apart, a few samples get enormous weights and the</span>
+<span class="cmt"># estimate is dominated by them — unbiased but useless.</span>
+
+clipping ratio ≤ 1.2  ⟹  ratio² ≤ <span class="val">1.44</span>   <span class="cmt"># bounded weight ⟹ bounded variance</span>
+</code></pre>
+    <p style="margin-top:6px">So the two pieces have cleanly separate jobs, and this is the sentence to remember: <span class="key">the ratio makes the estimate correct; the clip keeps it usable.</span> One is about bias, the other about variance &mdash; which is also exactly why the clip is a per-batch speed limit while the KL leash (page 6) bounds total drift.</p>
+  </div>
+
+<div class="card">
+    <h3>Epoch-by-epoch: -log(p) alone vs with ratio correction</h3>
+<pre><code><span class="cmt"># ⚠️ IMPORTANT: we track the push on the LOGIT (the raw number before softmax).</span>
+<span class="cmt"># The logit is what the optimizer actually changes. The probability is just</span>
+<span class="cmt"># softmax(logit) — a derived quantity. SGD reads gradients on LOGITS, not on p.</span>
+<span class="cmt">#</span>
+<span class="cmt"># For -log(p): gradient that reaches the logit = (1-p) × adv</span>
+<span class="cmt"># For ratio:   gradient that reaches the logit = ratio × (1-p) × adv</span>
+<span class="cmt"># (adv = 2.0 throughout)</span>
+</code></pre>
+    <div style="overflow-x:auto"><table>
+      <tr><th>Epoch</th><th>new_prob</th><th>ratio</th><th>-log(p) push: (1-p)×2</th><th>ratio push: ratio×(1-p)×2</th></tr>
+      <tr><td>1</td><td>0.40</td><td>1.00</td><td>(1-0.40)×2 = 1.20</td><td>1.00×0.60×2 = 1.20 (same)</td></tr>
+      <tr><td>2</td><td>0.46</td><td>1.15</td><td>(1-0.46)×2 = 1.08 <span style="color:#ef5350">↓</span></td><td>1.15×0.54×2 = 1.24 <span style="color:#4caf50">↑</span></td></tr>
+      <tr><td>3</td><td>0.52</td><td>1.30</td><td>(1-0.52)×2 = 0.96 <span style="color:#ef5350">↓</span></td><td style="color:#888">clipped (done)</td></tr>
+    </table></div>
+    <p style="margin-top:8px;font-size:.85em;color:#888">Note: -log(0.40) = 0.916 is the loss VALUE. The gradient that flows to the logit is (1-p) — that's what actually moves the weights.</p>
+  </div>
+
+  <details class="more"><summary>The standard PPO code (what papers and libraries use)</summary>
+<pre><code><span class="var">ratio</span> = <span class="fn">torch.exp</span>(<span class="var">new_log_probs</span> - <span class="var">old_log_probs</span>.<span class="fn">detach</span>())
+
+<span class="var">unclipped</span> = <span class="var">ratio</span> * <span class="var">advantages</span>
+<span class="var">clipped</span> = <span class="fn">torch.clamp</span>(<span class="var">ratio</span>, <span class="num">0.8</span>, <span class="num">1.2</span>) * <span class="var">advantages</span>
+<span class="var">actor_loss</span> = -<span class="fn">torch.min</span>(<span class="var">unclipped</span>, <span class="var">clipped</span>).<span class="fn">mean</span>()
+</code></pre>
+    <p><strong>Change 1: why torch.exp(log_new - log_old) = ratio</strong></p>
+<pre><code><span class="cmt"># log_new = log(new_prob),  log_old = log(old_prob)</span>
+<span class="cmt"># log_new - log_old = log(new_prob / old_prob)   ← log rule</span>
+<span class="cmt"># exp(log(x)) = x</span>
+<span class="cmt"># so: exp(log_new - log_old) = new_prob / old_prob = ratio</span>
+<span class="cmt">#</span>
+<span class="cmt"># Why bother? Probabilities can be tiny (1e-8). Dividing two tiny</span>
+<span class="cmt"># floats loses precision. Subtracting their logs keeps full precision.</span>
+</code></pre>
+    <p><strong>Change 2: why min(unclipped, clipped) = the active mask</strong></p>
+    <p>Four cases, worked out with numbers:</p>
+<pre><code><span class="cmt"># CASE 1: adv &gt; 0, ratio INSIDE [0.8, 1.2]  (e.g. ratio=1.1, adv=+2)</span>
+<span class="cmt">#   clamp(1.1, 0.8, 1.2) = 1.1 (unchanged)</span>
+<span class="cmt">#   unclipped = 1.1 × 2 = 2.2</span>
+<span class="cmt">#   clipped   = 1.1 × 2 = 2.2 (same!)</span>
+<span class="cmt">#   min = 2.2 → normal gradient flows. ✓ (same as active=True)</span>
+
+<span class="cmt"># CASE 2: adv &gt; 0, ratio OVER 1.2  (e.g. ratio=1.5, adv=+2)</span>
+<span class="cmt">#   clamp(1.5, 0.8, 1.2) = 1.2</span>
+<span class="cmt">#   unclipped = 1.5 × 2 = 3.0</span>
+<span class="cmt">#   clipped   = 1.2 × 2 = 2.4</span>
+<span class="cmt">#   min = 2.4 → picks the CONSTANT (1.2×2). Gradient = 0. ✓ (same as active=False)</span>
+
+<span class="cmt"># CASE 3: adv &lt; 0, ratio INSIDE [0.8, 1.2]  (e.g. ratio=0.9, adv=-3)</span>
+<span class="cmt">#   clamp(0.9, 0.8, 1.2) = 0.9 (unchanged)</span>
+<span class="cmt">#   unclipped = 0.9 × (-3) = -2.7</span>
+<span class="cmt">#   clipped   = 0.9 × (-3) = -2.7 (same!)</span>
+<span class="cmt">#   min = -2.7 → normal gradient flows. ✓ (same as active=True)</span>
+
+<span class="cmt"># CASE 4: adv &lt; 0, ratio UNDER 0.8  (e.g. ratio=0.6, adv=-3)</span>
+<span class="cmt">#   clamp(0.6, 0.8, 1.2) = 0.8</span>
+<span class="cmt">#   unclipped = 0.6 × (-3) = -1.8</span>
+<span class="cmt">#   clipped   = 0.8 × (-3) = -2.4</span>
+<span class="cmt">#   min picks the SMALLER number: min(-1.8, -2.4) = -2.4</span>
+<span class="cmt">#   -2.4 = 0.8 × adv = CONSTANT → gradient = 0. ✓ (same as active=False)</span>
+<span class="cmt">#</span>
+<span class="cmt"># Key insight for case 4: adv is negative, so BOTH values are negative.</span>
+<span class="cmt"># -1.8 &gt; -2.4 (closer to zero). min picks -2.4 (further from zero).</span>
+<span class="cmt"># That's the clamped one — a constant — so gradient = 0.</span>
+</code></pre>
+  </details>
+
+  <button class="nx" onclick="go(4)">Next: RLHF — where does the reward come from? &#x2192;</button>
+</div>
+
+<!-- ===== PAGE 4: RLHF — THE REWARD ===== -->
+<div class="step" data-s="4. RLHF: The Reward">
+  <h2>RLHF Step 1: Where Does the Reward Come From?</h2>
+
+  <div class="card red">
+    <h3>The problem: text has no environment</h3>
+<pre><code><span class="cmt"># Gridworld: the WORLD hands you the reward.</span>
+<span class="cmt">#   step into gold → +10. Step into pit → -10. Rules of the game.</span>
+<span class="cmt">#</span>
+<span class="cmt"># LLM: the model writes "Add more examples to each point."</span>
+<span class="cmt">#   ...and? Nothing happens. No gold, no pit. Text just sits there.</span>
+<span class="cmt">#</span>
+<span class="cmt"># To run ANY of the RL from ch. 3-5, you need a number: reward = ?</span>
+<span class="cmt"># RLHF's answer: BUILD the reward function out of human opinions.</span>
+</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>Why comparisons, not scores</h3>
+<pre><code><span class="cmt"># Ask a human: "rate this essay advice 0 to 1"</span>
+<span class="cmt">#   Person 1 says 0.8. Person 2 says 0.5. Same response!</span>
+<span class="cmt">#   Absolute scores are noisy — everyone has a different scale.</span>
+<span class="cmt">#</span>
+<span class="cmt"># Ask instead: "which of these two is better?"</span>
+<span class="cmt">#   Person 1: A. Person 2: A. Consistent!</span>
+<span class="cmt">#   Humans are bad at absolute numbers, good at comparisons.</span>
+</code></pre>
+  </div>
+
+  <div class="card hi">
+    <h3>The preference dataset</h3>
+<pre><code><span class="cmt"># Show a human two responses to the SAME prompt:</span>
+
+<span class="var">prompt</span> = <span class="str">"How do I make my essay longer?"</span>
+<span class="var">response_A</span> = <span class="str">"Add more examples and elaboration to each point."</span>
+<span class="var">response_B</span> = <span class="str">"Add spaces between every word lol"</span>
+
+<span class="cmt"># Human clicks: A is better.  → one training pair: (prompt, A ≻ B)</span>
+<span class="cmt"># Collect ~100k of these pairs. That's the entire human input to RLHF.</span>
+</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>What the RM actually is — build it in three moves</h3>
+    <p>The RM is <strong>not</strong> a new network trained from scratch — 100k pairs could never teach a model what text even <em>is</em>. It starts as a copy of the pretrained LLM:</p>
+<pre><code><span class="cmt"># 1. Copy the SFT LLM — the ENTIRE pretrained transformer body.</span>
+<span class="cmt">#    All of its language understanding comes along for free.</span>
+<span class="var">rm_body</span> = <span class="fn">copy</span>(<span class="var">sft_llm</span>)          <span class="cmt"># billions of weights, all pretrained</span>
+
+<span class="cmt"># 2. Throw away the vocab head (hidden → 50k token scores).</span>
+<span class="cmt">#    Bolt on a fresh one-number head:</span>
+<span class="var">rm_head</span> = <span class="fn">Linear</span>(<span class="num">4096</span>, <span class="num">1</span>)        <span class="cmt"># the ONLY randomly-initialized part</span>
+
+<span class="cmt"># 3. To score: run the text through, read the head at the LAST token:</span>
+<span class="var">h</span>     = <span class="var">rm_body</span>(<span class="var">prompt</span> + <span class="var">response</span>)   <span class="cmt"># (T, 4096) hidden states</span>
+<span class="var">score</span> = <span class="var">rm_head</span>(<span class="var">h</span>[-<span class="num">1</span>])               <span class="cmt"># one number = RM(prompt, response)</span>
+</code></pre>
+    <p style="margin-top:8px"><strong>"So it's a regression head?"</strong> Structurally yes — trained, no. Regression needs target numbers, and <em>no target scores exist anywhere in the data</em>: nobody ever labeled a response "0.82." The only supervision is "A beat B." So the scalar is trained purely through the pairwise loss below — 0.82 is a value the network <em>settled on</em>, not a label it matched. (This is also why only the GAP between two scores means anything: a head trained only through differences has no absolute scale. Add 100 to every score → same loss.)</p>
+    <p style="margin-top:8px"><strong>And note the output is UNBOUNDED.</strong> There is no sigmoid on the head — real RM scores are any real number (−8.3, +4.1, …). The sigmoid appears in the <em>loss</em>, never on the score. The friendly-looking <code>0.45</code> / <code>0.82</code> used on this page are readable stand-ins, <em>not</em> a 0–1 range; don't read them as probabilities.</p>
+    <p style="margin-top:8px">Division of labor: <strong>pretraining taught it language</strong> (trillions of tokens); <strong>the pairs teach it only taste</strong> (100k comparisons) — a thin judgment layer on top of representations that already understand any text.</p>
+  </div>
+
+  <div class="card">
+    <h3>Train the reward model on the pairs</h3>
+    <p>Input: (prompt, response). Output: <strong>one score</strong> — from the network you just built above.</p>
+<pre><code><span class="cmt"># Before training, the RM's scores are random:</span>
+<span class="fn">RM</span>(<span class="var">prompt</span>, <span class="var">response_A</span>) = <span class="num">0.45</span>
+<span class="fn">RM</span>(<span class="var">prompt</span>, <span class="var">response_B</span>) = <span class="num">0.52</span>   <span class="cmt"># wrong order! B scores higher</span>
+
+<span class="cmt"># Training objective: for every pair, make RM(preferred) &gt; RM(rejected).</span>
+<span class="cmt"># The gradient pushes RM(A) up and RM(B) down. After many epochs:</span>
+
+<span class="fn">RM</span>(<span class="var">prompt</span>, <span class="var">response_A</span>) = <span class="num">0.82</span>   <span class="cmt"># ✓ preferred scores higher</span>
+<span class="fn">RM</span>(<span class="var">prompt</span>, <span class="var">response_B</span>) = <span class="num">0.11</span>
+</code></pre>
+  </div>
+
+  <details class="more"><summary>The exact RM loss (Bradley-Terry), with numbers</summary>
+<pre><code><span class="cmt"># loss = -log( sigmoid( RM(preferred) - RM(rejected) ) )</span>
+<span class="cmt">#</span>
+<span class="cmt"># Before training: RM(A)-RM(B) = 0.45 - 0.52 = -0.07</span>
+<span class="cmt">#   sigmoid(-0.07) = 0.483</span>
+<span class="cmt">#   loss = -log(0.483) = 0.728        ← big loss, wrong order</span>
+<span class="cmt">#</span>
+<span class="cmt"># After training: RM(A)-RM(B) = 0.82 - 0.11 = 0.71</span>
+<span class="cmt">#   sigmoid(0.71) = 0.670</span>
+<span class="cmt">#   loss = -log(0.670) = 0.400        ← smaller loss, right order</span>
+<span class="cmt">#</span>
+<span class="cmt"># Note: only the GAP matters, not the absolute scores. The loss keeps</span>
+<span class="cmt"># shrinking as the gap widens — sigmoid never quite reaches 1.</span>
+</code></pre>
+  </details>
+  <p style="margin-top:6px;font-size:.88em">Both of those properties &mdash; only-gaps-matter, and a loss that never stops shrinking &mdash; are built into the statistical model this loss comes from. For it derived from scratch (plus its link to Elo and arena leaderboards), see the optional aside <a href="5a_bradley_terry.html" style="color:#4fc3f7">The Bradley-Terry model</a>.</p>
+
+  <div class="card">
+    <h3>How that loss becomes a trained RM — then a frozen grader</h3>
+    <p>The card above jumped from <code>0.45/0.52</code> to <code>0.82/0.11</code> with just "after many epochs." Here is the machinery in that gap — and it is nothing new. Training the RM is <strong>ordinary supervised learning</strong>: the same <code>backward()</code> / <code>step()</code> from chapters 3–5. No ratio, no clip, no advantage — those come later, for the LLM, not for the RM.</p>
+<pre><code><span class="cmt"># --- ONE pair, ONE step (weights = the RM's, right now) ---</span>
+<span class="var">loss</span> = -log(sigmoid(<span class="fn">RM</span>(A) - <span class="fn">RM</span>(B)))   <span class="cmt"># = 0.728  (from the foldable)</span>
+<span class="var">loss</span>.<span class="fn">backward</span>()      <span class="cmt"># every RM weight gets a gradient</span>
+<span class="var">optimizer</span>.<span class="fn">step</span>()    <span class="cmt"># nudge weights to shrink THIS pair's loss</span>
+
+<span class="cmt"># One step moves the two scores a hair in the right direction:</span>
+<span class="cmt">#   RM(A): 0.45 → ~0.47   (up)      loss: 0.728 → ~0.70</span>
+<span class="cmt">#   RM(B): 0.52 → ~0.50   (down)   (illustrative — one SGD step is tiny)</span>
+
+<span class="cmt"># --- The loop: repeat that over the whole dataset ---</span>
+<span class="kw">for</span> <span class="var">epoch</span> <span class="kw">in</span> <span class="fn">range</span>(<span class="num">few</span>):
+    <span class="kw">for</span> (<span class="var">prompt</span>, <span class="var">A</span>, <span class="var">B</span>) <span class="kw">in</span> <span class="var">preference_pairs</span>:   <span class="cmt"># all ~100k</span>
+        <span class="var">loss</span> = -log(sigmoid(<span class="fn">RM</span>(<span class="var">prompt</span>,<span class="var">A</span>) - <span class="fn">RM</span>(<span class="var">prompt</span>,<span class="var">B</span>)))
+        <span class="var">loss</span>.<span class="fn">backward</span>(); <span class="var">optimizer</span>.<span class="fn">step</span>(); <span class="var">optimizer</span>.<span class="fn">zero_grad</span>()
+
+<span class="cmt"># Those accumulated nudges ARE what turns 0.45/0.52 into the</span>
+<span class="cmt"># 0.82/0.11 shown above. The "after" scores are this loop's end state,</span>
+<span class="cmt"># not a separate magic step.</span>
+</code></pre>
+    <p style="margin-top:8px">Then the crucial move — <strong>freeze it</strong>:</p>
+<pre><code><span class="var">RM</span>.<span class="fn">requires_grad_</span>(<span class="kw">False</span>)   <span class="cmt"># no more gradients</span>
+<span class="var">RM</span>.<span class="fn">eval</span>()                   <span class="cmt"># it never learns again</span>
+
+<span class="cmt"># From now on RM is a fixed, pure function:  score = RM(prompt, response)</span>
+</code></pre>
+    <p style="margin-top:8px">That frozen function is the answer to page 5's <code>reward = ?</code>. On the next page the LLM trains with PPO <em>against this stationary grader</em> — the RM plays the role the gridworld's "+10 gold / −10 pit" played. Two separate trainings, in order: <strong>(1) train the RM</strong> with plain SGD (this page), <strong>(2) then train the LLM</strong> with PPO against the frozen RM (next page). Don't merge them.</p>
+  </div>
+
+  <div class="card">
+    <h3>"But doesn't the next pair UNDO this one?" — the tug-of-war on B</h3>
+    <p>Say the dataset has <strong>A ≻ B</strong> and <strong>B ≻ C</strong>. Train on (A,B): push RM(A) up, RM(B) <em>down</em>. Then train on (B,C): push RM(B) <em>up</em>, RM(C) down. B just went back up — did the second pair undo the first? Does this ping-pong forever, with A and B ending up close together again?</p>
+    <p style="margin-top:6px">It would — <strong>if the push were constant size</strong>. It isn't. The push fades with the pair's <em>own</em> gap. Watch it on a pretend-RM that is just three raw numbers:</p>
+<pre><code><span class="var">scores</span> = {<span class="str">A</span>: <span class="num">0.0</span>, <span class="str">B</span>: <span class="num">0.0</span>, <span class="str">C</span>: <span class="num">0.0</span>}   <span class="cmt"># one number per response</span>
+<span class="var">pairs</span>  = [(<span class="str">A</span>,<span class="str">B</span>), (<span class="str">B</span>,<span class="str">C</span>)]              <span class="cmt"># A beat B; B beat C</span>
+<span class="var">lr</span> = <span class="num">1.0</span>                               <span class="cmt"># huge on purpose, to see the motion</span>
+
+<span class="kw">for</span> <span class="var">round</span> <span class="kw">in</span> <span class="fn">range</span>(<span class="num">4</span>):
+    <span class="kw">for</span> (<span class="var">w</span>, <span class="var">l</span>) <span class="kw">in</span> <span class="var">pairs</span>:               <span class="cmt"># one pair at a time (your scenario)</span>
+        <span class="var">gap</span>  = <span class="var">scores</span>[<span class="var">w</span>] - <span class="var">scores</span>[<span class="var">l</span>]
+        <span class="var">push</span> = <span class="num">1</span> - <span class="fn">sigmoid</span>(<span class="var">gap</span>)         <span class="cmt"># ← THE FADE: gradient of -log(sigmoid(gap))</span>
+        <span class="var">scores</span>[<span class="var">w</span>] += <span class="var">lr</span> * <span class="var">push</span>          <span class="cmt">#   big gap → tiny push, small gap → big push</span>
+        <span class="var">scores</span>[<span class="var">l</span>] -= <span class="var">lr</span> * <span class="var">push</span>
+</code></pre>
+    <p style="margin-top:8px">Every number below follows from that loop (σ values you can check: σ(0)=0.500, σ(−0.5)=0.378, σ(0.378)=0.593, σ(0.338)=0.584):</p>
+    <div style="overflow-x:auto"><table>
+      <tr><th>update</th><th>gap before</th><th>push</th><th>A</th><th>B</th><th>C</th></tr>
+      <tr><td>start</td><td>—</td><td>—</td><td>0.00</td><td>0.00</td><td>0.00</td></tr>
+      <tr><td>1: (A,B)</td><td>0.00</td><td>0.500</td><td>+0.50</td><td>−0.50</td><td>0.00</td></tr>
+      <tr><td>1: (B,C)</td><td>−0.50</td><td>0.622</td><td>+0.50</td><td><strong>+0.12</strong></td><td>−0.62</td></tr>
+      <tr><td>2: (A,B)</td><td>0.38</td><td>0.407</td><td>+0.91</td><td>−0.28</td><td>−0.62</td></tr>
+      <tr><td>2: (B,C)</td><td>0.34</td><td>0.416</td><td>+0.91</td><td><strong>+0.13</strong></td><td>−1.04</td></tr>
+      <tr><td>3: (A,B)</td><td>0.77</td><td>0.315</td><td>+1.22</td><td>−0.18</td><td>−1.04</td></tr>
+      <tr><td>3: (B,C)</td><td>0.86</td><td>0.298</td><td>+1.22</td><td><strong>+0.11</strong></td><td>−1.34</td></tr>
+      <tr><td>4: (A,B)</td><td>1.11</td><td>0.248</td><td>+1.47</td><td>−0.13</td><td>−1.34</td></tr>
+      <tr><td>4: (B,C)</td><td>1.20</td><td>0.231</td><td>+1.47</td><td><strong>+0.10</strong></td><td>−1.57</td></tr>
+    </table></div>
+    <p style="margin-top:8px">Read the table three ways:</p>
+    <ul style="margin-left:18px;margin-top:4px">
+      <li><strong>Yes, the tugs fight — that's the mechanism, not a bug.</strong> B gets shoved down 0.50, then up 0.62 (row 2: "B is up again!"). But look at B's swing: 0.62 → 0.42 → 0.30 → 0.23. It shrinks every round.</li>
+      <li><strong>The fade is the stabilizer.</strong> Each pair only pushes as hard as <em>its own</em> gap is unfinished. B ends parked (~+0.1) between A (+1.47) and C (−1.57): a staircase A &gt; B &gt; C, which satisfies BOTH pairs at once. A and C run away because each has only ONE tug; B stays middle because it has two opposing ones.</li>
+      <li><strong>B can never rejoin A.</strong> This is the key self-balancing move: if B ever creeps toward A, the (A,B) gap shrinks — which makes the (A,B) down-push on B <em>stronger</em>. Approaching A reactivates the exact force that separates them. Whichever gap is currently smallest gets the loudest correction.</li>
+    </ul>
+    <details class="more"><summary>"A hit +1.47 — scores can go past 1? Is there a guard?"</summary>
+      <p style="margin-top:8px"><strong>Is the SCORE bounded? No, deliberately.</strong> The head is a bare <code>Linear(4096, 1)</code>; the sigmoid is in the loss, not on the output. +1.47 is normal — and since only gaps matter (add 100 to every score → identical loss), the absolute scale is arbitrary anyway.</p>
+      <p style="margin-top:6px"><strong>Can the PUSH exceed 1? Never.</strong> <code>push = 1 − σ(gap)</code> ∈ (0,1) by construction — at most 1.0 when the model has the pair completely backwards, → 0 when it's confident. One update moves a score by at most <code>lr × 1</code>. (The step is <code>lr × push</code>, so a too-large lr still overshoots; within one pair that can't reverse the order — the gap strictly increases — but with shared weights it wrecks OTHER pairs. Page 0's crash, again.)</p>
+      <p style="margin-top:6px"><strong>Does it grow forever, then? Yes — logarithmically.</strong></p>
+<pre><code><span class="cmt"># one pair, lr = 1. Each update: A += push, B -= push, so gap += 2·push</span>
+<span class="cmt">#   gap: 0 → 1.00 → 1.54 → 1.89 → 2.15 → 2.36 → ...</span>
+<span class="cmt"># each step adds 2·lr·(1−σ(gap)), which decays like e^(−gap),</span>
+<span class="cmt"># so the gap grows like ln(t). Reaching gap 10 takes ~11,000 updates.</span>
+<span class="cmt"># Unbounded — but it cannot explode on its own.</span>
+
+<span class="cmt"># The literal guard in code:</span>
+<span class="var">loss</span>.<span class="fn">backward</span>()
+<span class="fn">clip_grad_norm_</span>(<span class="var">rm</span>.<span class="fn">parameters</span>(), <span class="num">1.0</span>)   <span class="cmt"># cap the update size</span>
+<span class="var">optimizer</span>.<span class="fn">step</span>()
+<span class="cmt"># plus: small lr, weight decay, and the real stopper — early stop ~1 epoch.</span>
+<span class="cmt"># DPO's equivalents: β scales the gap, the frozen reference anchors it.</span>
+</code></pre>
+    </details>
+    <details class="more"><summary>In real training it's even cleaner: batches make the tugs cancel INSIDE one update</summary>
+<pre><code><span class="cmt"># Real training doesn't alternate pair-by-pair. Both pairs sit in one</span>
+<span class="cmt"># batch; gradients are computed from the SAME scores, then summed:</span>
+
+<span class="cmt"># round 1, batch = {(A,B), (B,C)}, all scores 0.0:</span>
+<span class="cmt">#   (A,B): gap 0 → push 0.5:   A +0.5,  B −0.5</span>
+<span class="cmt">#   (B,C): gap 0 → push 0.5:   B +0.5,  C −0.5</span>
+<span class="cmt">#   summed:                    A +0.5,  B −0.5+0.5 = 0,  C −0.5</span>
+
+<span class="cmt"># B's two tugs cancel ARITHMETICALLY before the weights ever move.</span>
+<span class="cmt"># B never wiggles at all — A and C just separate symmetrically</span>
+<span class="cmt"># around it: pushes 0.50, 0.38, 0.29, ... same fade, no ping-pong.</span>
+</code></pre>
+    </details>
+    <details class="more"><summary>And when the data DISAGREES (A ≻ B, B ≻ C, C ≻ A) — the ceiling, explained</summary>
+<pre><code><span class="cmt"># Raters produce a cycle: A beat B, B beat C, C beat A. No staircase</span>
+<span class="cmt"># can satisfy all three. What does the loop do? Batch it:</span>
+
+<span class="cmt">#   (A,B): A +0.5, B −0.5</span>
+<span class="cmt">#   (B,C): B +0.5, C −0.5</span>
+<span class="cmt">#   (C,A): C +0.5, A −0.5</span>
+<span class="cmt">#   summed: A 0, B 0, C 0    ← every letter wins once, loses once</span>
+
+<span class="cmt"># Scores freeze at equal → every gap 0 → sigmoid 0.5 → the RM predicts</span>
+<span class="cmt"># a coin flip on these pairs forever. loss stuck at -log(0.5) = 0.693.</span>
+<span class="cmt"># These pairs are UNLEARNABLE — and real preference data is full of</span>
+<span class="cmt"># them, because humans genuinely disagree. That is the 65-75% accuracy</span>
+<span class="cmt"># ceiling in the next card, derived instead of asserted. Training more</span>
+<span class="cmt"># epochs can't resolve a cycle — it can only memorize which exact pairs</span>
+<span class="cmt"># appeared, i.e. overfit.</span>
+</code></pre>
+    </details>
+  </div>
+
+  <div class="card orange">
+    <h3>So when does the loop stop? (the gate you noticed is missing)</h3>
+    <p>Good catch: that loop has <strong>no natural stop</strong>. <code>sigmoid</code> never reaches 1, so the loss shrinks toward zero <em>forever</em> as the gap widens — "train to convergence" would just mean "train until it memorizes." The RM is one of the rare models you <strong>deliberately undertrain</strong>. The real gate is not the loss and not a fixed epoch count you guess in advance; it's <strong>held-out preference accuracy</strong>:</p>
+<pre><code><span class="cmt"># Split the pairs BEFORE training:</span>
+<span class="var">train_pairs</span>, <span class="var">val_pairs</span> = <span class="fn">split</span>(<span class="var">preference_pairs</span>)   <span class="cmt"># e.g. 95% / 5%</span>
+
+<span class="cmt"># After each pass, measure on pairs the RM has NEVER seen:</span>
+<span class="var">val_acc</span> = mean( <span class="fn">RM</span>(<span class="var">prompt</span>,<span class="var">A</span>) > <span class="fn">RM</span>(<span class="var">prompt</span>,<span class="var">B</span>)  <span class="kw">for</span> pair <span class="kw">in</span> <span class="var">val_pairs</span> )
+<span class="cmt">#   "on unseen pairs, how often does the winner outscore the loser?"</span>
+
+<span class="cmt"># Stop when val_acc stops improving. In practice that is ~1 epoch:</span>
+<span class="cmt">#   epoch 1:  train_loss 0.69 → 0.55,  val_acc 0.50 → 0.71   ✓ keep</span>
+<span class="cmt">#   epoch 2:  train_loss 0.55 → 0.38,  val_acc 0.71 → 0.69   ✗ OVERFIT</span>
+<span class="cmt">#             (train loss still dropping, but val_acc went DOWN — stop)</span>
+</code></pre>
+    <p style="margin-top:8px">That accuracy tops out around <strong>65–75%</strong>, not 99% — because it is capped by how often two <em>humans</em> even agree on the same pair. The RM cannot be more right than its labels. (Numbers above are illustrative of the shape; the ~1-epoch and 65–75% figures are the reported industry norm since InstructGPT.)</p>
+
+    <p style="margin-top:10px">Undertraining on purpose is only the <em>first</em> of the reward model's failure modes. The other three — correlated pairs, length bias, and reward over-optimization — need the PPO loop and the KL leash before they make sense, so they get their own tab at the end: <strong>7. What Breaks</strong>.</p>
+  </div>
+
+  <div class="card ok">
+    <h3>What you now have</h3>
+    <p>An <strong>automatic grader</strong>: a function that scores ANY response to ANY prompt, no human in the loop. It's the "+10 gold / −10 pit" of the text world — except it's learned, not given. That difference will bite us on the last page (reward hacking).</p>
+    <details class="more"><summary>"ANY response"? It only ever saw 100k pairs — can it judge text that looks nothing like them?</summary>
+      <p style="margin-top:8px">Fair challenge. Split it in two:</p>
+      <p style="margin-top:6px"><strong>Different phrasing — fine.</strong> The RM's body is the whole pretrained LLM, so a response worded unlike any training pair still lands in representations it understands. The pairs taught taste, not language; taste generalizes across phrasings the way all LLM finetuning does.</p>
+      <p style="margin-top:6px"><strong>Different distribution — genuinely not fine.</strong> The pairs were collected on responses sampled from the <em>SFT model</em>. During PPO the policy drifts away from that distribution — and the RM is now queried on text unlike anything its preference data covered. It still confidently outputs scores; they're just unsupported. Worse, the policy is <em>actively hunting</em> for high scores, so it steers into exactly these blind regions. That is the reward hacking / over-optimization from the trap table, met from a new angle.</p>
+      <p style="margin-top:6px">Two production answers: <strong>(1) the KL leash</strong> (two pages ahead) — keep the policy near the reference, i.e. inside the region the RM's training data actually covers; <strong>(2) iterated RLHF</strong> — periodically collect fresh preference pairs on the <em>current</em> policy's outputs and retrain the RM, so the grader's coverage follows the student (InstructGPT and Anthropic both did this).</p>
+    </details>
+  </div>
+  <button class="nx" onclick="go(5)">Next: The PPO loop on an LLM &#x2192;</button>
+</div>
+
+<!-- ===== PAGE 5: RLHF — THE LOOP ===== -->
+<div class="step" data-s="5. RLHF: The Loop">
+  <h2>RLHF Step 2: PPO, With the LLM as the Policy</h2>
+
+  <div class="card hi">
+    <h3>The mapping — same algorithm, different world</h3>
+    <table>
+      <tr><th>Concept</th><th>Gridworld</th><th>LLM (RLHF)</th></tr>
+      <tr><td>State</td><td>Grid position (row, col)</td><td>Prompt + tokens generated so far</td></tr>
+      <tr><td>Action</td><td>Up / Down / Left / Right (4 options)</td><td>Next token (50k options)</td></tr>
+      <tr><td>Policy &#x03C0;</td><td>Small neural net</td><td>The LLM itself (softmax over vocab)</td></tr>
+      <tr><td>Episode</td><td>Start &#x2192; treasure/pit (~5 steps)</td><td>Prompt &#x2192; full response (~200 tokens)</td></tr>
+      <tr><td>Reward</td><td>&minus;1 per step, +10 at gold</td><td><strong>ONE number at the end</strong>: RM(prompt, response)</td></tr>
+    </table>
+    <p style="margin-top:8px">Note the reward row: like the gridworld's gold, the score arrives <strong>only when the episode ends</strong>. No per-token rewards — the RM can't grade half a sentence.</p>
+  </div>
+
+  <div class="card">
+    <h3>One episode, traced end to end</h3>
+<pre><code><span class="cmt"># 1. Sample a prompt from the dataset</span>
+<span class="var">prompt</span> = <span class="str">"How do I make my essay longer?"</span>
+
+<span class="cmt"># 2. The LLM (current policy) generates a response, token by token,</span>
+<span class="cmt">#    sampling from its softmax at each step — exactly like sampling</span>
+<span class="cmt">#    up/down/left/right in the grid</span>
+<span class="var">response</span> = <span class="str">"Add more examples and elaboration to each point."</span>
+<span class="cmt">#    (also save old_prob of every generated token — PPO needs them)</span>
+
+<span class="cmt"># 3. The frozen RM grades the finished response</span>
+<span class="var">reward</span> = <span class="fn">RM</span>(<span class="var">prompt</span>, <span class="var">response</span>) = <span class="num">0.82</span>
+</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>The advantage — same formula as chapter 4</h3>
+<pre><code><span class="cmt"># The critic V is a small extra head ON the LLM. Input: the prompt.</span>
+<span class="cmt"># Output: one number — "for this prompt, what RM score do I usually get?"</span>
+
+<span class="var">V</span>(<span class="var">prompt</span>) = <span class="num">0.60</span>   <span class="cmt"># "essay questions: I typically score ~0.60"</span>
+
+<span class="cmt"># Advantage = actual − expected. Chapter 4, unchanged:</span>
+<span class="var">advantage</span> = <span class="num">0.82</span> - <span class="num">0.60</span> = <span class="hl">+0.22</span>   <span class="cmt"># better than expected → push up</span>
+
+<span class="cmt"># A second sampled response scores badly:</span>
+<span class="cmt">#   RM = 0.11 → advantage = 0.11 - 0.60 = -0.49 → push down</span>
+<span class="cmt">#</span>
+<span class="cmt"># Why V matters here (same as ch.4): hard prompts get low RM scores</span>
+<span class="cmt"># for EVERY response. Without V, every response to a hard prompt gets</span>
+<span class="cmt"># punished — even the best one the model can currently produce.</span>
+</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>One reward, many tokens</h3>
+<pre><code><span class="cmt"># The response has ~10 tokens. The RM gave ONE number for all of them.</span>
+<span class="cmt"># Simplest scheme: every token inherits the response's advantage.</span>
+
+<span class="cmt">#   token:      "Add"  "more"  "examples"  ...  "point"  "."</span>
+<span class="cmt">#   advantage:  +0.22  +0.22   +0.22       ...  +0.22    +0.22</span>
+
+<span class="cmt"># Then each token is one PPO sample: it has its own old_prob (saved at</span>
+<span class="cmt"># generation), its own new_prob, its own ratio, its own clip check.</span>
+<span class="cmt"># The pages 1-3 machinery runs per token, unchanged:</span>
+
+<span class="var">ratio</span>  = <span class="var">new_prob</span> / <span class="var">old_prob</span>          <span class="cmt"># per token, shape (T,)</span>
+<span class="var">active</span> = ((<span class="var">adv</span> >= <span class="num">0</span>) &amp; (<span class="var">ratio</span> &lt;= <span class="num">1.2</span>)) | ((<span class="var">adv</span> &lt; <span class="num">0</span>) &amp; (<span class="var">ratio</span> >= <span class="num">0.8</span>))
+<span class="var">loss</span>   = -(<span class="var">ratio</span> * <span class="var">adv</span> * <span class="var">active</span>).<span class="fn">mean</span>()
+
+<span class="cmt"># (Smearing one grade over all tokens is crude — "was every word of a</span>
+<span class="cmt">#  0.82 response equally good?" No. Chapter 8 shows GRPO doing the same</span>
+<span class="cmt">#  broadcast, and ch. 11 shows the fix: per-token teacher feedback.)</span>
+</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>Shapes: how one response becomes a (batch, tokens) tensor</h3>
+    <p>Above, one response gave tensors of shape <code>(T,)</code>. Real training uses
+    <code>(batch, T)</code>. Walk the chain — the batch dimension <em>changes meaning</em>
+    on the way from the grid to the LLM:</p>
+<pre><code><span class="cmt"># (1) GRID (ch. 3-4): one sample = one STEP of the route.</span>
+<span class="cmt">#     Walking is sequential (need step 3's state before acting step 4),</span>
+<span class="cmt">#     but once the route is RECORDED, all stored states go through the</span>
+<span class="cmt">#     net in one forward pass:</span>
+<span class="var">states</span>  <span class="cmt"># (T, 9)  T steps, each a one-hot grid position</span>
+<span class="var">logits</span>  <span class="cmt"># (T, 4)  each row: that step's up/down/left/right probs</span>
+<span class="cmt">#     Batch = a pile of step-rows. No token dimension anywhere.</span>
+
+<span class="cmt"># (2) LLM: one sample = one TOKEN. So a 3-token answer = 3 rows?</span>
+<span class="cmt">#     Row t would be (state = the prefix, action = the token):</span>
+<span class="cmt">#       feed "Q"          → prob of "Add"</span>
+<span class="cmt">#       feed "Q Add"      → prob of "more"</span>
+<span class="cmt">#       feed "Q Add more" → prob of "examples"</span>
+<span class="cmt">#     Legal, but wasteful — the three prefixes are 90% the same text.</span>
+
+<span class="cmt"># (3) The causal mask collapses the 3 rows into 1. One forward pass on</span>
+<span class="cmt">#     the FULL sentence: position t is only allowed to look left, so its</span>
+<span class="cmt">#     output IS p(token_t | prefix_t) — for every t simultaneously:</span>
+<span class="var">logits</span> = <span class="fn">llm</span>(<span class="str">"Q Add more examples"</span>)   <span class="cmt"># (T, vocab) — all probs, one pass</span>
+<span class="cmt">#     The grid net can't do this: its states share no structure. The</span>
+<span class="cmt">#     causal mask is exactly what turns token ROWS into a token DIMENSION.</span>
+
+<span class="cmt"># (4) That frees the batch dimension for whole sentences. Stack 32</span>
+<span class="cmt">#     responses, pad the short ones:</span>
+<span class="var">tokens</span>    <span class="cmt"># (32, 64)  64 = longest response; shorter rows right-padded</span>
+<span class="var">pad_mask</span>  <span class="cmt"># (32, 64)  1 = real token, 0 = padding (excluded from the loss)</span>
+
+<span class="cmt"># (5) Each row is self-contained: its own old_log_probs, its own</span>
+<span class="cmt">#     broadcast advantage, its own mask. Nothing in the loss looks</span>
+<span class="cmt">#     ACROSS rows — so rows from different prompts mix freely.</span>
+<span class="cmt">#     Collect 100 prompts × 5 responses = 500 rows, shuffle, slice</span>
+<span class="cmt">#     off whatever fits in GPU memory. Which question a row came from</span>
+<span class="cmt">#     is irrelevant; the only unbreakable unit is that a response's</span>
+<span class="cmt">#     tokens stay together in ONE row — computing each token's prob</span>
+<span class="cmt">#     needs its prefix sitting to its left.</span>
+</code></pre>
+    <p style="margin-top:8px">(No KV-cache anywhere in this forward — caching past keys/values
+    is a <em>generation</em> trick for producing one token at a time. The training pass is
+    one parallel sweep.)</p>
+  </div>
+
+  <div class="card ok">
+    <h3>The full loop — every shape printed</h3>
+<pre><code><span class="cmt"># ---- COLLECT (no_grad; the policy that samples here is "old") ----</span>
+<span class="var">prompts</span>   = <span class="fn">sample_prompts</span>(<span class="num">100</span>)
+<span class="var">responses</span> = <span class="fn">llm.generate</span>(<span class="var">prompts</span>, <span class="var">k</span>=<span class="num">5</span>)     <span class="cmt"># 500 sequences, pad to T=64</span>
+
+<span class="var">tokens</span>        <span class="cmt"># (500, 64)  token ids</span>
+<span class="var">pad_mask</span>      <span class="cmt"># (500, 64)  1 = real, 0 = padding</span>
+<span class="var">old_log_probs</span> <span class="cmt"># (500, 64)  log p_old(token_t | prefix), saved at generation</span>
+
+<span class="var">rewards</span> = <span class="fn">RM</span>(<span class="var">prompts</span>, <span class="var">responses</span>)            <span class="cmt"># (500,)  one grade per response</span>
+<span class="var">values</span>  = <span class="fn">V</span>(<span class="var">prompts</span>)                        <span class="cmt"># (500,)  expected grade per prompt</span>
+<span class="var">adv</span> = (<span class="var">rewards</span> - <span class="var">values</span>)[:, <span class="kw">None</span>]           <span class="cmt"># (500, 1) → broadcasts to (500, 64):</span>
+                                            <span class="cmt"># every token gets its response's grade</span>
+
+<span class="cmt"># ---- TRAIN ----</span>
+<span class="kw">for</span> <span class="var">epoch</span> <span class="kw">in</span> <span class="fn">range</span>(<span class="num">4</span>):                        <span class="cmt"># reuse the batch (page 1!)</span>
+    <span class="kw">for</span> <span class="var">rows</span> <span class="kw">in</span> <span class="fn">shuffle</span>(<span class="num">500</span>).<span class="fn">split</span>(<span class="num">32</span>):      <span class="cmt"># NOTE: rows = RESPONSES, not tokens.</span>
+                                             <span class="cmt"># 32 integers in [0,500). Never a token</span>
+                                             <span class="cmt"># index — a token needs its prefix, so a</span>
+                                             <span class="cmt"># response cannot be split (see above).</span>
+
+        <span class="cmt"># the model emits a distribution over the WHOLE vocab per position...</span>
+        <span class="var">logits</span> = <span class="fn">llm</span>(<span class="var">tokens</span>[<span class="var">rows</span>])           <span class="cmt"># (32, 64, 50000)  one causal forward</span>
+
+        <span class="cmt"># ...and we keep only the log-prob of the token that WAS produced:</span>
+        <span class="var">new_log_probs</span> = <span class="fn">gather_logprob</span>(<span class="var">logits</span>, <span class="var">tokens</span>[<span class="var">rows</span>])   <span class="cmt"># (32, 64)</span>
+        <span class="cmt">#   element [i, t] = log p( token t of response i | its prefix )</span>
+        <span class="cmt">#   PER TOKEN — not one number per response. That distinction is</span>
+        <span class="cmt">#   the whole reason PPO can clip each token separately.</span>
+
+        <span class="var">ratio</span>  = <span class="fn">torch.exp</span>(<span class="var">new_log_probs</span> - <span class="var">old_log_probs</span>[<span class="var">rows</span>])  <span class="cmt"># (32, 64)</span>
+        <span class="var">active</span> = (((<span class="var">adv</span>[<span class="var">rows</span>] >= <span class="num">0</span>) &amp; (<span class="var">ratio</span> &lt;= <span class="num">1.2</span>)) |
+                  ((<span class="var">adv</span>[<span class="var">rows</span>] &lt;  <span class="num">0</span>) &amp; (<span class="var">ratio</span> >= <span class="num">0.8</span>))).<span class="fn">float</span>()  <span class="cmt"># (32, 64)</span>
+        <span class="var">loss</span> = -(<span class="var">ratio</span> * <span class="var">adv</span>[<span class="var">rows</span>] * <span class="var">active</span> * <span class="var">pad_mask</span>[<span class="var">rows</span>]).<span class="fn">sum</span>() \
+                 / <span class="var">pad_mask</span>[<span class="var">rows</span>].<span class="fn">sum</span>()     <span class="cmt"># divide by REAL-token count,</span>
+                                             <span class="cmt"># not 32×64 — padding must not</span>
+                                             <span class="cmt"># dilute the update</span>
+        <span class="var">loss</span>.<span class="fn">backward</span>(); <span class="var">opt</span>.<span class="fn">step</span>(); <span class="var">opt</span>.<span class="fn">zero_grad</span>()
+
+<span class="var">critic_loss</span> = ((<span class="var">values</span> - <span class="var">rewards</span>)**<span class="num">2</span>).<span class="fn">mean</span>()  <span class="cmt"># critic learns to predict RM</span>
+<span class="fn">update_critic</span>()
+</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>Per-token or per-response? One <code>.sum()</code> apart &mdash; and it separates PPO from DPO</h3>
+    <p>The forward pass above produces a <strong>per-token</strong> tensor. The number chapter 6 calls "the probability of a whole response" is that same tensor summed along the token axis. Both live one line apart:</p>
+<pre><code><span class="var">new_log_probs</span>                                <span class="cmt"># (32, 64)  per TOKEN</span>
+(<span class="var">new_log_probs</span> * <span class="var">pad_mask</span>[<span class="var">rows</span>]).<span class="fn">sum</span>(dim=<span class="num">1</span>)   <span class="cmt"># (32,)     per RESPONSE</span>
+<span class="cmt">#                                    ↑ mask first, or padding joins the sum</span>
+</code></pre>
+    <div class="scroll"><table>
+      <tr><th>Method</th><th>Uses</th><th>Because its loss compares&hellip;</th></tr>
+      <tr><td>PPO (this page), GRPO</td><td>the <strong>per-token</strong> tensor, unsummed</td><td>&hellip;each token against its own old probability, so every token needs its own ratio and its own clip decision</td></tr>
+      <tr><td><a href="6_dpo.html" style="color:#4fc3f7">DPO</a>, <a href="14_simpo.html" style="color:#4fc3f7">SimPO</a></td><td>the <strong>summed</strong> per-response number</td><td>&hellip;one whole response against another whole response, so it needs a single score per response</td></tr>
+    </table></div>
+    <p style="margin-top:6px">So PPO&#x2019;s refusal to take that sum is not an oversight &mdash; it is what buys per-token clipping. And ch. 6&#x2019;s Step 0 (product of token probabilities = sum of their logs) is literally this <code>.sum(dim=1)</code>.</p>
+  </div>
+  <button class="nx" onclick="go(6)">Next: Reward hacking &amp; the KL leash &#x2192;</button>
+</div>
+
+<!-- ===== PAGE 6: RLHF — KL LEASH ===== -->
+<div class="step" data-s="6. RLHF: KL Leash">
+  <h2>RLHF Step 3: The Reward Is Fake — Keep a Leash On</h2>
+
+  <div class="card red">
+    <h3>Reward hacking: optimizing the grader, not the goal</h3>
+<pre><code><span class="cmt"># The RM is NOT the truth. It's a model of human taste, trained on</span>
+<span class="cmt"># ~100k pairs. It has blind spots. PPO will FIND them.</span>
+<span class="cmt">#</span>
+<span class="cmt"># Example: in the preference data, longer answers happened to win more</span>
+<span class="cmt"># often. The RM quietly learned "long ≈ good". PPO discovers this:</span>
+<span class="cmt">#</span>
+<span class="cmt">#   response: 800 words of fluent, polite, empty padding</span>
+<span class="cmt">#   RM score: 0.95        ← the grader loves it</span>
+<span class="cmt">#   real human: 0.2       ← a person would hate it</span>
+<span class="cmt">#</span>
+<span class="cmt"># PPO doesn't know the 0.95 is a bug. Reward is reward. It will push</span>
+<span class="cmt"># the whole model toward padding — and DESTROY its pretrained abilities</span>
+<span class="cmt"># in the process. This is called reward hacking.</span>
+</code></pre>
+  </div>
+
+  <div class="card hi">
+    <h3>The fix: penalize drifting from the reference model</h3>
+<pre><code><span class="cmt"># π_ref = a FROZEN copy of the LLM before RL started.</span>
+<span class="cmt"># Per token, measure how much the policy's probabilities have drifted</span>
+<span class="cmt"># from the reference (KL divergence — big = drifted far).</span>
+
+<span class="hl"><span class="var">reward</span> = <span class="fn">RM</span>(<span class="var">prompt</span>, <span class="var">response</span>) - <span class="var">&#x03B2;</span> * <span class="fn">KL</span>(<span class="var">&#x03C0;_new</span> || <span class="var">&#x03C0;_ref</span>)</span>
+
+<span class="cmt"># β = 0.02 (small). Honest vs hacked, with numbers:</span>
+<span class="cmt">#</span>
+<span class="cmt"># honest response: RM = 0.82, KL = 0.3  (normal drift)</span>
+<span class="cmt">#   reward = 0.82 - 0.02 × 0.3  = 0.82 - 0.006 = 0.814   ← barely touched</span>
+<span class="cmt">#</span>
+<span class="cmt"># hacked response: RM = 0.95, KL = 25   (padding gibberish = huge drift —</span>
+<span class="cmt">#   the pretrained model would NEVER produce this, so π_new ≫ π_ref)</span>
+<span class="cmt">#   reward = 0.95 - 0.02 × 25   = 0.95 - 0.50  = 0.45    ← hack wiped out</span>
+<span class="cmt">#</span>
+<span class="cmt"># 0.814 &gt; 0.45: the honest response now wins. The hack isn't worth it.</span>
+</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>Wait — isn't the clip already a leash? Why two?</h3>
+    <table>
+      <tr><th></th><th>The clip (pages 2-3)</th><th>The KL penalty</th></tr>
+      <tr><td>Limits</td><td>change per <strong>batch</strong></td><td>total drift from <strong>π_ref</strong>, ever</td></tr>
+      <tr><td>Compares against</td><td>&#x03C0;_old (re-snapshotted every batch)</td><td>&#x03C0;_ref (frozen forever)</td></tr>
+      <tr><td>Analogy</td><td>speed limit</td><td>"stay within 50 km of home"</td></tr>
+    </table>
+    <p style="margin-top:8px">A thousand small clipped steps, each legal, can still walk the model arbitrarily far from its pretrained self. The clip can't see that — its reference point moves every batch. The KL penalty's reference point <strong>never moves</strong>, so accumulated drift always costs.</p>
+  </div>
+
+  <div class="card ok">
+    <h3>The complete RLHF pipeline</h3>
+<pre><code><span class="cmt"># Stage 1 — SFT: fine-tune pretrained LLM on good demonstrations</span>
+<span class="cmt">#            (this becomes π_ref, the frozen reference)</span>
+<span class="cmt"># Stage 2 — RM: collect ~100k preference pairs, train the reward model</span>
+<span class="cmt"># Stage 3 — PPO: the page-5 loop, with reward = RM - β×KL</span>
+<span class="cmt">#</span>
+<span class="cmt"># That's ChatGPT's original recipe (InstructGPT, 2022).</span>
+<span class="cmt"># Everything in it, you now know piece by piece.</span>
+</code></pre>
+  </div>
+
+  <button class="nx" onclick="go(7)">Next: What breaks &#x2014; the four RM failure modes &#x2192;</button>
+</div>
+
+<!-- ===== PAGE 7: WHAT BREAKS ===== -->
+<div class="step" data-s="7. What Breaks">
+  <h2>What Breaks: The Reward Model&#x2019;s Four Failure Modes</h2>
+
+  <div class="card hi">
+    <h3>The spine: traps in the order the RM&#x2019;s life produces them</h3>
+    <table>
+      <tr><th>Stage</th><th>What goes wrong</th><th>You feel it as</th></tr>
+      <tr><td>1. Collect the pairs</td><td><strong>Correlated pairs</strong> &#x2014; one prompt contributes many non-independent comparisons</td><td>RM memorizes prompts; wasted compute</td></tr>
+      <tr><td>1. Collect the pairs</td><td><strong>Length bias</strong> &#x2014; "longer" is the easiest signal in the data</td><td>Nothing yet &#x2014; it detonates in stage 3</td></tr>
+      <tr><td>2. Train the RM</td><td><strong>Overfitting</strong> &#x2014; no stop gate, tiny signal, huge model</td><td>Val accuracy turns down after ~1 epoch</td></tr>
+      <tr><td>3. Run PPO against it</td><td><strong>Over-optimization</strong> &#x2014; the policy hunts the RM&#x2019;s blind spots</td><td>RM score climbing while quality drops</td></tr>
+    </table>
+    <p style="margin-top:8px">Traps 1 and 3 are planted at data-collection time but only explode later. That delay is what makes them hard: by the time you see padding in the outputs, the cause is 100k labels ago.</p>
+  </div>
+
+  <div class="card">
+    <h3>Trap 1 &#x2014; Overfitting: why you deliberately undertrain</h3>
+
+    <p><strong>Step 1. What "overfit" means here specifically.</strong> Not the vague "memorizes training data." Concretely: instead of learning <em>taste</em> ("thorough, correct, on-topic answers win"), the RM latches onto surface marks unique to these exact texts &#x2014; this labeler&#x2019;s phrasings, this prompt&#x2019;s topic words &#x2014; and uses them to recall which response won.</p>
+
+    <p style="margin-top:8px"><strong>Step 2. Why the RM is unusually fragile.</strong> Count the actual supervision:</p>
+<pre><code><span class="cmt"># One preference pair teaches exactly ONE BIT: "A won, not B."</span>
+<span class="cmt">#   100,000 pairs = 100,000 bits = 12.5 KILOBYTES of information.</span>
+<span class="cmt">#</span>
+<span class="cmt"># That 12.5 KB is shaping a network with BILLIONS of parameters.</span>
+<span class="cmt"># Compare pretraining: trillions of tokens, each teaching ~a full</span>
+<span class="cmt"># token-prediction target.</span>
+<span class="cmt">#</span>
+<span class="cmt"># A model that big can fit 12.5 KB of labels perfectly, many times</span>
+<span class="cmt"># over, without learning anything general. Memorization is the EASY</span>
+<span class="cmt"># path here, not the hard one.</span>
+</code></pre>
+
+    <p style="margin-top:8px"><strong>Step 3. The symptom.</strong> (Same numbers as page 4, restated as the diagnosis:)</p>
+<pre><code><span class="cmt">#   epoch 1:  train_loss 0.69 -&gt; 0.55,  val_acc 0.50 -&gt; 0.71   keep</span>
+<span class="cmt">#   epoch 2:  train_loss 0.55 -&gt; 0.38,  val_acc 0.71 -&gt; 0.69   OVERFIT</span>
+<span class="cmt">#</span>
+<span class="cmt"># Note the two columns disagree. Train loss says "still improving!"</span>
+<span class="cmt"># Val accuracy says "you are getting worse at the actual job."</span>
+</code></pre>
+
+    <p style="margin-top:8px"><strong>Step 4. Why the loss cannot be your gate.</strong> This is the tug-of-war result from page 4: the loss keeps shrinking as the gap widens, forever, because sigmoid never reaches 1. A falling train loss is therefore <em>zero evidence</em> of progress &#x2014; it falls just as happily when the model is memorizing. There is no loss value that means "done."</p>
+
+    <p style="margin-top:8px"><strong>Step 5. So the gate is held-out accuracy</strong> &#x2014; and it plateaus almost immediately:</p>
+<pre><code><span class="var">val_acc</span> = mean( <span class="fn">RM</span>(<span class="var">prompt</span>,<span class="var">A</span>) &gt; <span class="fn">RM</span>(<span class="var">prompt</span>,<span class="var">B</span>)  <span class="kw">for</span> pair <span class="kw">in</span> <span class="var">val_pairs</span> )
+<span class="cmt"># Stop when this stops rising. In practice: ~1 epoch. Sometimes 2.</span>
+</code></pre>
+
+    <p style="margin-top:8px"><strong>Step 6. And it tops out at 65&#x2013;75%, not 99%</strong> &#x2014; which page 4 derived rather than asserted: when labelers disagree, the pairs form cycles (A&#x227B;B, B&#x227B;C, C&#x227B;A) whose gradients cancel exactly, freezing those scores at a coin flip forever. Those pairs are <em>unlearnable</em>. More epochs cannot resolve a contradiction &#x2014; they can only memorize which contradictory pairs appeared, which is precisely the overfitting in step 1.</p>
+
+    <p style="margin-top:8px"><strong>Step 7. Practical settings</strong>, and why each one:</p>
+    <div style="overflow-x:auto"><table>
+      <tr><th>Setting</th><th>Typical</th><th>Why</th></tr>
+      <tr><td>epochs</td><td>1 (sometimes 2)</td><td>Val accuracy peaks there</td></tr>
+      <tr><td>learning rate</td><td>~1e&#x2212;5 or lower</td><td>Big steps memorize individual pairs before the shared pattern emerges</td></tr>
+      <tr><td>what you watch</td><td>val accuracy</td><td>The loss is uninformative (step 4)</td></tr>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h3>Trap 2 &#x2014; Correlated pairs: one prompt sneaking in six times</h3>
+
+    <p><strong>Step 1. Where multiple pairs per prompt come from.</strong> You do not show a labeler two responses. You show <strong>K</strong> responses to one prompt and ask them to <em>rank</em> all K. Ranking 4 costs barely more labeler time than comparing 2, and yields far more comparisons &#x2014; that is the whole point.</p>
+
+    <p style="margin-top:8px"><strong>Step 2. One ranking becomes C(K,2) pairs.</strong> With K=4 and the labeler ranking c1 &gt; c2 &gt; c3 &gt; c4:</p>
+<pre><code><span class="cmt"># every response beats every response below it:</span>
+(c1,c2) (c1,c3) (c1,c4) (c2,c3) (c2,c4) (c3,c4)
+<span class="cmt"># C(4,2) = 6 pairs from ONE prompt and ONE labeler judgment.</span>
+</code></pre>
+
+    <p style="margin-top:8px"><strong>Step 3. The naive move</strong> &#x2014; treat those 6 as 6 ordinary training examples and shuffle them into the dataset like everything else. This is what breaks.</p>
+
+    <p style="margin-top:8px"><strong>Step 4. Why it breaks, reason A (statistical).</strong> Those 6 pairs are <em>not independent samples</em>. They encode ONE labeler&#x2019;s ONE opinion about ONE prompt. Shuffled apart, that single opinion now steers <strong>6 separate weight updates</strong> per epoch:</p>
+<pre><code><span class="cmt"># If this labeler had an idiosyncratic view of this prompt, the RM</span>
+<span class="cmt"># gets told the same quirk 6 times, from 6 different directions.</span>
+<span class="cmt"># It looks like 6 pieces of evidence. It is 1.</span>
+<span class="cmt"># -&gt; the RM memorizes THIS prompt's ranking. Trap 1, accelerated.</span>
+</code></pre>
+
+    <p style="margin-top:8px"><strong>Step 5. Why it breaks, reason B (compute).</strong> Count forward passes. Each of the 4 responses appears in 3 of the 6 pairs (it pairs with each of the other three):</p>
+<pre><code><span class="cmt"># SHUFFLED: 6 pairs x 2 responses = 12 forward passes</span>
+<span class="cmt">#           ...but there are only 4 distinct texts. Each is</span>
+<span class="cmt">#           recomputed 3 times, in 3 different batches. 3x waste.</span>
+</code></pre>
+
+    <p style="margin-top:8px"><strong>Step 6. The fix &#x2014; keep the ranking together in one batch</strong> (this is what InstructGPT does). Score each response <em>once</em>, then form all 6 comparisons from those 4 numbers:</p>
+<pre><code><span class="cmt"># 4 forward passes, one per distinct response:</span>
+<span class="var">s1</span>, <span class="var">s2</span>, <span class="var">s3</span>, <span class="var">s4</span> = <span class="fn">RM</span>(<span class="var">prompt</span>, <span class="var">c1</span>), <span class="fn">RM</span>(<span class="var">prompt</span>, <span class="var">c2</span>), <span class="fn">RM</span>(<span class="var">prompt</span>, <span class="var">c3</span>), <span class="fn">RM</span>(<span class="var">prompt</span>, <span class="var">c4</span>)
+
+<span class="cmt"># all 6 comparisons reuse those 4 numbers &#x2014; no extra forwards:</span>
+<span class="var">loss</span> = <span class="fn">mean</span>( -log(sigmoid(<span class="var">s_w</span> - <span class="var">s_l</span>))  <span class="kw">for</span> (<span class="var">w</span>,<span class="var">l</span>) <span class="kw">in</span> <span class="var">six_pairs</span> )
+<span class="var">loss</span>.<span class="fn">backward</span>(); <span class="var">optimizer</span>.<span class="fn">step</span>()
+
+<span class="cmt"># RESULT: 4 forwards instead of 12, and ONE grouped weight update</span>
+<span class="cmt"># per prompt instead of 6 &#x2014; so the prompt counts once, as it should.</span>
+</code></pre>
+
+    <p style="margin-top:8px">Both problems are fixed by the same move, which is why this is a favorite question: the grouping is simultaneously the statistical fix and the 3&#xD7; speedup.</p>
+  </div>
+
+  <div class="card">
+    <h3>Trap 3 &#x2014; Length bias: the easiest feature wins</h3>
+
+    <p><strong>Step 1. The bias is not a labeling error.</strong> This is the part people get wrong. Given two answers, the more thorough one usually <em>is</em> better. So "longer wins" is a genuine, honest correlation in the data &#x2014; the labelers were not being lazy.</p>
+
+    <p style="margin-top:8px"><strong>Step 2. Why the RM over-learns it.</strong> Gradient descent takes the cheapest route that lowers the loss. Compare what two features cost the network:</p>
+    <div style="overflow-x:auto"><table>
+      <tr><th>Feature</th><th>What computing it requires</th></tr>
+      <tr><td>"Is this answer helpful and correct?"</td><td>Read it, understand the question, judge the reasoning &#x2014; the full depth of the network</td></tr>
+      <tr><td>"How long is it?"</td><td>Essentially count tokens. Nearly free.</td></tr>
+    </table></div>
+    <p style="margin-top:6px">Both lower the loss on the training pairs. One is nearly free. So the RM leans on length far more than the correlation justifies: it learns <code>score</code> &#x2248; partly <code>f(length)</code>.</p>
+
+    <p style="margin-top:8px"><strong>Step 3. Nothing looks wrong yet.</strong> Val accuracy is fine &#x2014; length genuinely predicts the labels on held-out pairs too. Trap 3 is invisible at RM-training time. It detonates only in stage 3.</p>
+
+    <p style="margin-top:8px"><strong>Step 4. PPO finds it.</strong> The policy is <em>searching</em> for high RM scores, and "add more words" is the cheapest direction that raises the score. That is exactly page 6&#x2019;s example, now with its origin explained:</p>
+<pre><code><span class="cmt">#   response: 800 words of fluent, polite, empty padding</span>
+<span class="cmt">#   RM score:   0.95    &#x2190; the grader loves it (length!)</span>
+<span class="cmt">#   real human: 0.2     &#x2190; a person would hate it</span>
+</code></pre>
+
+    <p style="margin-top:8px"><strong>Step 5. Detect it before it costs you a run</strong> &#x2014; the diagnostic is one line:</p>
+<pre><code><span class="cmt"># On a FIXED eval set (not the training pairs):</span>
+<span class="fn">corr</span>( <span class="fn">RM</span>(<span class="var">x</span>, <span class="var">y</span>),  <span class="fn">len</span>(<span class="var">y</span>) )     <span class="cmt"># ideally ~0; often strongly positive</span>
+
+<span class="cmt"># Sharper version: hold quality fixed and vary only length.</span>
+<span class="cmt"># If padding a good answer with filler RAISES its score, you have it.</span>
+</code></pre>
+
+    <p style="margin-top:8px"><strong>Step 6. Three places to fix it</strong>, in increasing order of bluntness:</p>
+    <div style="overflow-x:auto"><table>
+      <tr><th>Where</th><th>Fix</th></tr>
+      <tr><td>Data collection</td><td>Length-balance the pairs: make sure the winner is short about as often as it is long, so length stops predicting the label</td></tr>
+      <tr><td>PPO reward</td><td><code>reward = RM(x,y) &#x2212; &#x3BB; &#xD7; len(y)</code> &#x2014; an explicit penalty that cancels the RM&#x2019;s bias</td></tr>
+      <tr><td>The score itself</td><td>Normalize by length &#x2014; this is what <a href="6_dpo.html" style="color:#4fc3f7">chapter 6</a>&#x2019;s SimPO does to the DPO score, for exactly this reason</td></tr>
+    </table></div>
+  </div>
+
+  <div class="card red">
+    <h3>Trap 4 &#x2014; Reward over-optimization: even a GOOD reward model fails</h3>
+
+    <p><strong>Step 1. Two different scores exist, and only one is trainable.</strong> Name them, because the whole trap lives in the gap between them:</p>
+    <div style="overflow-x:auto"><table>
+      <tr><th>Name</th><th>What it is</th><th>Availability</th></tr>
+      <tr><td><strong>proxy</strong></td><td>The RM&#x2019;s score</td><td>Free, instant, on every response &#x2014; so you train on it</td></tr>
+      <tr><td><strong>gold</strong></td><td>What real humans actually think</td><td>Expensive, slow &#x2014; you can only sample it occasionally</td></tr>
+    </table></div>
+
+    <p style="margin-top:8px"><strong>Step 2. The finding (Gao et al., 2023).</strong> Train PPO against the proxy while periodically measuring gold with fresh human labels. Gold does not track proxy &#x2014; it rises, <em>peaks, then declines</em> while proxy keeps climbing:</p>
+<pre><code><span class="cmt"># PPO steps        proxy (RM score)      gold (true quality)</span>
+<span class="cmt">#   early              0.60                  0.60</span>
+<span class="cmt">#   mid                0.85                  0.72   &#x2190; both rising: healthy</span>
+<span class="cmt">#   late               0.95                  0.55   &#x2190; proxy UP, gold DOWN</span>
+<span class="cmt">#</span>
+<span class="cmt"># (Shape is the paper's result; these numbers are illustrative.)</span>
+<span class="cmt"># Every metric on your dashboard says the run is going great.</span>
+</code></pre>
+
+    <p style="margin-top:8px"><strong>Step 3. Why &#x2014; and this is the mechanism, not just "Goodhart&#x2019;s law".</strong> Three links:</p>
+<pre><code><span class="cmt"># (a) The RM was trained on responses from the SFT model. Its scores</span>
+<span class="cmt">#     are only trustworthy on text that LOOKS like that.</span>
+<span class="cmt">#</span>
+<span class="cmt"># (b) PPO moves the policy AWAY from the SFT distribution &#x2014; that is</span>
+<span class="cmt">#     literally its job. So the RM is increasingly asked to grade text</span>
+<span class="cmt">#     unlike anything in its training data, where it extrapolates.</span>
+<span class="cmt">#</span>
+<span class="cmt"># (c) The policy is not sampling those regions at random. It is</span>
+<span class="cmt">#     SEARCHING for whatever scores highest &#x2014; i.e. actively hunting</span>
+<span class="cmt">#     the RM's largest over-estimates. The errors are not noise;</span>
+<span class="cmt">#     they are the target.</span>
+</code></pre>
+
+    <p style="margin-top:8px"><strong>Step 4. It is trap 1&#x2019;s "no stop gate," one level up.</strong> The RM&#x2019;s loss never says "done"; now the <em>policy&#x2019;s</em> objective never says "done" either. Optimizing harder always raises the proxy. Nothing in the objective knows the proxy has stopped meaning anything.</p>
+
+    <p style="margin-top:8px"><strong>Step 5. Three fixes, stacked in practice</strong> &#x2014; note none of them is "make a better RM," because the trap survives a good RM:</p>
+    <div style="overflow-x:auto"><table>
+      <tr><th>Fix</th><th>How it stops the mechanism</th></tr>
+      <tr><td><strong>KL leash</strong> (page 6)</td><td>Attacks link (b): keeps the policy near &#x3C0;_ref, i.e. inside the region where the RM&#x2019;s training data actually lives</td></tr>
+      <tr><td><strong>Early stop on a gold eval</strong></td><td>Attacks step 2 directly: pay for a small batch of fresh human labels periodically, and stop at the gold peak rather than the proxy peak</td></tr>
+      <tr><td><strong>Iterated RLHF</strong></td><td>Attacks link (a): re-collect preference pairs on the CURRENT policy&#x2019;s outputs and retrain the RM, so its coverage follows the policy instead of falling behind</td></tr>
+    </table></div>
+    <p style="margin-top:8px">The KL leash is the one you can implement today with no extra humans, which is why page 6 taught it as <em>the</em> fix. But it only buys distance, not correctness: crank the KL budget up and the peak returns.</p>
+  </div>
+
+  <div class="card ok">
+    <h3>The four traps, one line each</h3>
+    <div style="overflow-x:auto"><table>
+      <tr><th>Trap</th><th>Root cause</th><th>Detect</th><th>Fix</th></tr>
+      <tr><td>Overfitting</td><td>12.5 KB of labels vs billions of params, and a loss with no stop gate</td><td>Val accuracy turns down</td><td>Stop at ~1 epoch; low LR</td></tr>
+      <tr><td>Correlated pairs</td><td>C(K,2) pairs from one judgment treated as independent</td><td>One prompt driving many updates</td><td>Group a ranking into one batch (4 forwards, not 12)</td></tr>
+      <tr><td>Length bias</td><td>Length is a real but nearly-free feature</td><td>corr(score, length) on fixed eval</td><td>Length-balanced pairs; &#x2212;&#x3BB;&#xB7;len penalty; normalize</td></tr>
+      <tr><td>Over-optimization</td><td>Policy hunts the RM&#x2019;s blind spots off-distribution</td><td>Gold eval falls while proxy rises</td><td>KL leash; early stop on gold; iterated RLHF</td></tr>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h3>The complete journey</h3>
+    <table>
+      <tr><th>Ch.</th><th>Algorithm</th><th>What it adds</th><th>Problem solved</th></tr>
+      <tr><td>0</td><td>Policy gradient idea</td><td>gradient &#xD7; reward</td><td>Learning without labels</td></tr>
+      <tr><td>1</td><td>Bandit</td><td>Explore vs exploit</td><td>Finding the best action</td></tr>
+      <tr><td>2</td><td>Q-learning</td><td>States + Q-table</td><td>Different situations need different actions</td></tr>
+      <tr><td>3</td><td>REINFORCE</td><td>Neural network policy</td><td>Scaling to large/continuous states</td></tr>
+      <tr><td>4</td><td>Actor-Critic</td><td>Baseline V(s)</td><td>Too much noise in the learning signal</td></tr>
+      <tr><td>5</td><td>PPO</td><td>Clip + reuse</td><td>One bad update destroys everything</td></tr>
+      <tr><td style="color:#4fc3f7;font-weight:700;">5&#xBD;</td><td style="color:#4fc3f7;font-weight:700;">RLHF</td><td style="color:#4fc3f7;font-weight:700;">Learned reward model + KL leash</td><td style="color:#4fc3f7;font-weight:700;">No environment gives rewards for text</td></tr>
+      <tr><td>&#x2192; 6</td><td>DPO</td><td>Skip the RM entirely</td><td>RLHF's pipeline is heavy — next chapter</td></tr>
+    </table>
+  </div>
+</div>
+
+<script>
+const steps=document.querySelectorAll('.step');
+const nav=document.getElementById('nav');
+steps.forEach((s,i)=>{const b=document.createElement('button');b.textContent=s.dataset.s;b.onclick=()=>go(i);if(i===0)b.classList.add('on');nav.appendChild(b);});
+function go(n){steps.forEach((s,i)=>s.classList.toggle('on',i===n));nav.querySelectorAll('button').forEach((b,i)=>{b.classList.remove('on');if(i<n)b.classList.add('done');else b.classList.remove('done');if(i===n)b.classList.add('on');});window.scrollTo({top:0,behavior:'smooth'});}
+</script>
+</body>
+</html>
